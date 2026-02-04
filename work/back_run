@@ -1,0 +1,97 @@
+export local_type=1
+export verbose=5
+export solver=geometric
+#export solver=berny
+export shared_disk=0
+#export max_memory=20000
+#export max_memory=36000
+
+export method=cmbeosvmp2
+export use_frozen=1
+export use_sl=1
+export cal_mode=grad
+export wrap_test=0
+export direct_int=0
+export loc_fit=1
+
+#export basis=def2-svp
+#export basis=def2-tzvp
+#export basis=def2-qzvpp
+export basis=ccpvdz
+#export basis=augccpvtz
+#export basis=6-31G
+#export basis=3-21G
+#export basis=6-31G**
+#export basis=6-31+g**
+
+export spin=0
+export cposv_tol=1e-10
+#export idsvd_tol=1e-4
+export osv_tol=1e-4
+#export osv_tol=1e-10
+#export osv_tol=0
+export remo_tol=1e-2
+export disc_tol=1e-7
+export threeb_tol=0.2
+export shell_tol=1e-10
+export fit_tol=1e-6
+export bfit_tol=1e-2
+
+source /data1/qjliang/work/env.sh
+source $OSVMP2PATH/test_functions.sh
+export molecule=cg2_ch3cho2_syn_water1112
+#export moles=$OSVMP2PATH/coords/$molecule.xyz
+export moles=$OSVMP2PATH/coords/cg_water1112/$molecule.xyz
+#export chkfile_init=hf_mat.chk
+#export chkfile_loc=loc_var.chk
+export qm_region="[0,1,2,3,4,5,6,7]"
+export qm_atoms="[0,1,2,3,4,5,6,7]"
+export qm_center=2
+export nwater_qm=15
+export nonwater_region=$qm_atoms
+export cg_residue=CG2
+#export ncore=1;export OMP_NUM_THREADS=16;export direct_int=0;export use_mbe=0;export use_ga=0
+export ncore=4;export OMP_NUM_THREADS=1;export use_mbe=1;export use_ga=1
+#cd test;rm -rf *tmp*;mpirun -n $ncore python $OSVMP2PATH/osvmp2/opt_df.py $moles;rm -rf *tmp*;cd ..
+#bash batch_md.sh 
+#bash run_md.sh
+#export ntraj=1;md_batch
+export step_init=1;export step_end=5; md_loop &
+sleep 2
+export step_init=6;export step_end=10; md_loop &
+sleep 2
+export step_init=11;export step_end=15; md_loop &
+sleep 2
+export step_init=16;export step_end=20; md_loop &
+sleep 2
+export step_init=21;export step_end=25; md_loop &
+sleep 2
+export step_init=26;export step_end=30; md_loop &
+sleep 2
+export step_init=31;export step_end=35; md_loop &
+sleep 2
+export step_init=36;export step_end=40; md_loop &
+sleep 2
+export step_init=41;export step_end=45; md_loop &
+sleep 2
+export step_init=46;export step_end=50; md_loop &
+sleep 2
+export step_init=51;export step_end=55; md_loop &
+sleep 2
+export step_init=56;export step_end=60; md_loop &
+sleep 2
+export step_init=61;export step_end=65; md_loop &
+sleep 2
+export step_init=66;export step_end=70; md_loop &
+sleep 2
+export step_init=71;export step_end=75; md_loop &
+sleep 2
+export step_init=76;export step_end=80; md_loop &
+sleep 2
+export step_init=81;export step_end=85; md_loop &
+sleep 2
+export step_init=86;export step_end=90; md_loop &
+sleep 2
+export step_init=91;export step_end=95; md_loop &
+sleep 2
+export step_init=96;export step_end=99; md_loop &

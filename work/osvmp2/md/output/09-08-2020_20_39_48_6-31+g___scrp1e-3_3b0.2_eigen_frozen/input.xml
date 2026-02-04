@@ -1,0 +1,32 @@
+<simulation verbosity='medium'>
+	<output prefix='sim_nve'>
+		<properties stride='10' filename='out'>  [step, time{femtosecond}, conserved{kelvin}, temperature{kelvin}, kinetic_md{electronvolt}, potential{electronvolt}] </properties>
+		<trajectory filename='pos' stride='10' format='xyz' cell_units='angstrom'> positions{angstrom} </trajectory>
+		<trajectory filename='vel' stride='10' format='xyz' cell_units='angstrom'> velocities </trajectory>
+		<checkpoint filename='chk' stride='10' overwrite='True'/>
+	</output>
+	<total_steps> 20000 </total_steps>
+	<prng>
+		<seed> 3348 </seed>
+	</prng>
+	<ffsocket mode='inet' name='driver' pbc='False'>
+		<address>localhost</address>
+		<port> 53947 </port>
+	</ffsocket>
+	<system>
+		<initialize nbeads='1'>
+			<file mode='xyz' units='angstrom'> eigen_frozen.xyz </file>
+			<cell mode='abc' units='angstrom'> [ 56.3, 56.3, 56.3 ] </cell>
+			<velocities mode='thermal' units='kelvin'> 300 </velocities>
+		</initialize>
+		<forces>
+			<force forcefield='driver'/>
+		</forces>
+		<motion mode='dynamics'>
+			<fixcom> True </fixcom>
+			<dynamics mode='nve'>
+				<timestep units='femtosecond'> 0.5 </timestep>
+			</dynamics>
+		</motion>
+	</system>
+</simulation>

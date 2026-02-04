@@ -1,0 +1,10 @@
+The molecue to be computed: zundel_frozen
+The number of nodes: 1, cores: 16, threads/core: 1
+Maximum memory per node: 90920.34 MB (223.56 MB used)
+Basis set: 631+g**
+Auxilary basis for HF: heavy-aug-cc-pvdz-jkfit
+Auxilary basis for MP2: heavy-aug-cc-pvdz-jkfit
+The number of AOs: 173
+The number of occupied MOs: 30
+The number of auxilary basis for RHF: 815
+The number of auxilary basis for MP2: 815

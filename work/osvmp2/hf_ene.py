@@ -1,0 +1,1277 @@
+##################################################################
+
+# Import the packages needed
+from multiprocessing import Barrier
+import sys
+import numpy
+import scipy
+from numpy.linalg import norm
+from pyscf import gto, scf, df, lib
+from pyscf.df import DF
+from pyscf.lib import logger
+from pyscf.gto.moleintor import make_loc
+from pyscf.solvent import ddcosmo
+from pyscf import __config__
+from pyscf.ao2mo import _ao2mo
+import time
+import psutil
+import types
+import h5py
+import ctypes
+import numpy as np
+from numpy.linalg import multi_dot
+from osvmp2.mm import qmmm
+from osvmp2.OSVL import parallel_eri
+#from int_prescreen import shell_prescreen
+from osvmp2.mm.solvation import get_veff_sol, get_grad_sol
+from osvmp2.loc import loc_addons
+from osvmp2 import int_prescreen
+from osvmp2.osvutil import *
+from osvmp2.ga_addons import *
+import shutil
+from mpi4py import MPI
+import os.path
+
+#OSV_grad = None
+#Set up MPI environment
+comm = MPI.COMM_WORLD
+nrank = comm.Get_size()   # Size of communicator
+irank = comm.Get_rank()   # Ranks in communicator
+inode = MPI.Get_processor_name()    # Node where this MPI process runs
+comm_shm = comm.Split_type(MPI.COMM_TYPE_SHARED) # Create sub-comm for each node
+irank_shm= comm_shm.rank # rank index in sub-comm
+nnode = nrank//comm_shm.size
+
+def feri_slice(self, dfobj, blksize=None):
+    if blksize is None:
+        blksize = dfobj.blockdim
+    auxmol = dfobj.auxmol
+    naoaux = auxmol.nao_nr()
+    '''if self.shared_disk or self.use_ga:
+        aux_slice = get_slice(range(nrank), job_size=naoaux)[irank]
+    else:
+        aux_slice = get_slice(self.shm_ranklist, job_size=naoaux)[irank_shm]'''
+    aux_slice = get_auxshell_slice(auxmol)[0][irank]
+
+    if (self.use_ga):
+        if (self.outcore):
+            for b0, b1 in dfobj.prange(0, len(aux_slice), blksize):
+                yield self.file_feri['j3c'][b0:b1]
+        else:
+            for b0, b1 in dfobj.prange(0, len(aux_slice), blksize):
+                yield self.feri_aux[b0:b1]
+    else:
+        aux0, aux1 = aux_slice[0], aux_slice[-1]+1
+        if (self.outcore):
+            #with h5py.File('%s/feri_tmp_%d.tmp'%(self.dir_feri, irank), 'r') as feri:
+            for b0, b1 in dfobj.prange(0, len(aux_slice), blksize):
+                yield self.file_feri['j3c'][b0:b1]
+        else:
+            for b0, b1 in dfobj.prange(aux0, aux1, blksize):
+                yield dfobj._cderi[b0:b1]
+
+def bcast_dm(dm):
+    if irank_shm== 0:
+        win_col = create_win(dm, comm=comm)
+    else:
+        win_col = create_win(None, comm=comm)
+    win_col.Fence()
+    if irank_shm== 0 and irank != 0:
+        win_col.Lock(0, lock_type=MPI.LOCK_SHARED)
+        win_col.Get(dm, target_rank=0)
+        win_col.Unlock(0)
+    win_col.Fence()
+    free_win(win_col)
+    return dm
+
+def collect_dm(dm):
+    if irank_shm== 0:
+        win_col = create_win(dm, comm=comm)
+    else:
+        win_col = create_win(None, comm=comm)
+    win_col.Fence()
+    if irank_shm== 0 and irank != 0:
+        win_col.Lock(0)
+        win_col.Accumulate(dm, target_rank=0, op=MPI.SUM)
+        win_col.Unlock(0)
+    win_col.Fence()
+    free_win(win_col)
+    return dm
+
+def init_guess_by_minao(mol):
+    from pyscf.scf import atom_hf
+    from pyscf.scf import addons
+
+    def minbeasis(symb, nelec_ecp):
+        stdsymb = gto.mole._std_symbol(symb)
+        basis_add = gto.basis.load('ano', stdsymb)
+        occ = []
+        basis_ano = []
+# coreshl defines the core shells to be removed in the initial guess
+        coreshl = gto.ecp.core_configuration(nelec_ecp)
+        #coreshl = (0,0,0,0)  # it keeps all core electrons in the initial guess
+        for l in range(4):
+            ndocc, frac = atom_hf.frac_occ(stdsymb, l)
+            if coreshl[l] > 0:
+                occ.extend([0]*coreshl[l]*(2*l+1))
+            if ndocc > coreshl[l]:
+                occ.extend([2]*(ndocc-coreshl[l])*(2*l+1))
+            if frac > 1e-15:
+                occ.extend([frac]*(2*l+1))
+                ndocc += 1
+            if ndocc > 0:
+                basis_ano.append([l] + [b[:ndocc+1] for b in basis_add[l][1:]])
+
+        if nelec_ecp > 0:
+            occ4ecp = []
+            basis4ecp = []
+            nelec_valence_left = gto.mole.charge(stdsymb) - nelec_ecp
+            for l in range(4):
+                if nelec_valence_left <= 0:
+                    break
+                ndocc, frac = atom_hf.frac_occ(stdsymb, l)
+                assert(ndocc >= coreshl[l])
+
+                n_valenc_shell = ndocc - coreshl[l]
+                l_occ = [2] * (n_valenc_shell*(2*l+1))
+                if frac > 1e-15:
+                    l_occ.extend([frac] * (2*l+1))
+                    n_valenc_shell += 1
+
+                shell_found = 0
+                for bas in mol._basis[symb]:
+                    if shell_found >= n_valenc_shell:
+                        break
+                    if bas[0] == l:
+                        off = n_valenc_shell - shell_found
+                        # b[:off+1] because the first column of bas[1] is exp
+                        basis4ecp.append([l] + [b[:off+1] for b in bas[1:]])
+                        shell_found += len(bas[1]) - 1
+
+                nelec_valence_left -= int(sum(l_occ[:shell_found*(2*l+1)]))
+                occ4ecp.extend(l_occ)
+
+            if nelec_valence_left > 0:
+                logger.debug(mol, 'Characters of %d valence electrons are '
+                             'not identified in the minao initial guess.\n'
+                             'Electron density of valence ANO for %s will '
+                             'be used.', nelec_valence_left, symb)
+                return occ, basis_ano
+
+# Compared to ANO valence basis, to check whether the ECP basis set has
+# reasonable AO-character contraction.  The ANO valence AO should have
+# significant overlap to ECP basis if the ECP basis has AO-character.
+            atm1 = gto.Mole()
+            atm2 = gto.Mole()
+            atom = [[symb, (0.,0.,0.)]]
+            atm1._atm, atm1._bas, atm1._env = atm1.make_env(atom, {symb:basis4ecp}, [])
+            atm2._atm, atm2._bas, atm2._env = atm2.make_env(atom, {symb:basis_ano}, [])
+            atm1._built = True
+            atm2._built = True
+            s12 = gto.intor_cross('int1e_ovlp', atm1, atm2)[:,numpy.array(occ)>0]
+            if abs(numpy.linalg.det(s12)) > .1:
+                occ, basis_ano = occ4ecp, basis4ecp
+            else:
+                logger.debug(mol, 'Density of valence part of ANO basis '
+                             'will be used as initial guess for %s', symb)
+        return occ, basis_ano
+
+    atmlst = set([mol.atom_symbol(ia) for ia in range(mol.natm)])
+
+    nelec_ecp_dic = {}
+    for ia in range(mol.natm):
+        symb = mol.atom_symbol(ia)
+        if symb not in nelec_ecp_dic:
+            nelec_ecp_dic[symb] = mol.atom_nelec_core(ia)
+
+    basis = {}
+    occdic = {}
+    for symb in atmlst:
+        if not gto.is_ghost_atom(symb):
+            nelec_ecp = nelec_ecp_dic[symb]
+            occ_add, basis_add = minbeasis(symb, nelec_ecp)
+            occdic[symb] = occ_add
+            basis[symb] = basis_add
+    occ = []
+    new_atom = []
+    for ia in range(mol.natm):
+        symb = mol.atom_symbol(ia)
+        if not gto.is_ghost_atom(symb):
+            occ.append(occdic[symb])
+            new_atom.append(mol._atom[ia])
+    occ = numpy.hstack(occ)
+
+    pmol = gto.Mole()
+    pmol._atm, pmol._bas, pmol._env = pmol.make_env(new_atom, basis, [])
+    pmol._built = True
+    c = addons.project_mo_nr2nr(pmol, numpy.eye(pmol.nao_nr()), mol)
+
+    dm = numpy.dot(c*occ, c.conj().T)
+# normalize eletron number
+#    s = mol.intor_symmetric('int1e_ovlp')
+#    dm *= mol.nelectron / (dm*s).sum()
+    return c, occ, dm
+
+def make_rdm1(mo_coeff, mo_occ, **kwargs):
+    mocc = mo_coeff[:,mo_occ>0]
+    dm = numpy.dot(mocc*mo_occ[mo_occ>0], mocc.conj().T)
+    return dm
+
+
+def get_jk(self, dfobj, dm, hermi=1, with_j=True, with_k=True, loc_df=False, rijcosx=False):
+    assert(with_j or with_k)
+    tt = t1 = time_now()
+    log = logger.Logger(sys.stdout, self.verbose)
+    nao = self.mol.nao_nr()
+    naoaux = dfobj.auxmol.nao_nr()
+    nocc = self.mocc.shape[-1]
+    ao_loc = make_loc(self.mol._bas, 'sph')
+    mol = self.mol
+    auxmol = dfobj.auxmol
+    #rijcosx = True
+    rijcosx = False
+    if rijcosx:
+        with_j = True
+        with_k = False
+    loc_df = False
+    #loc_df = True
+    jk_opt = 1
+    if self.direct_int == True:
+        def get_alip_gammaq():
+            ao_slice, shell_slice_rank = int_prescreen.get_slice_rank(mol, self.shell_slice, aslice=True)
+            
+            if with_j:
+                win_gammaq, gammaq_node = get_shared(naoaux)
+            if with_k:
+                address_alip = []
+                for rank_i, slice_i in enumerate(ao_slice):
+                    if slice_i is not None:
+                        ao0, ao1 = slice_i
+                        address_alip.append([rank_i, slice_i])
+                comm.Barrier()
+                if loc_df:
+                    if nocc > mol.nelectron//2:
+                        win_uo, uo = get_shared((nocc, nocc))
+                        if irank_shm== 0:
+                            uo[:] = loc_addons.localization(mol, self.mocc, verbose=0)
+                        comm_shm.Barrier()
+                        self.mocc[:] = ddot(self.mocc, uo)
+                        comm_shm.Barrier()
+                        free_win(win_uo); uo = None
+                    else:
+                        if irank_shm== 0:
+                            uo = loc_addons.localization(mol, self.mocc, verbose=0)
+                            self.mocc[:] = ddot(self.mocc, uo)
+                        comm.Barrier()
+                    win_pcharge, pcharge = get_shared((mol.natm, nocc))
+                    if irank_shm== 0:
+                        with h5py.File('pcharge.tmp', 'r') as file_pc:
+                            file_pc['charge'].read_direct(pcharge)
+                    comm_shm.Barrier()
+                    self.lmo_close, self.lmo_remote, self.nlmo_close = LMO_domains(mol, self.mocc, tol_lmo=1e-6)
+                    tot_prime = 0#1e-2
+                    self.fit_close, self.naux_close = FIT_domains(mol, auxmol, self.mocc, pcharge, tot_prime=tot_prime, tot_nsup=4)
+                    if irank == 0:
+                        print(np.mean(self.nlmo_close))
+                        print(self.naux_close)
+                    self.mocc[:] = moco_fit(mol, self.mocc, self.lmo_close, self.lmo_remote, self.nlmo_close)
+                    comm_shm.Barrier()
+                    free_win(win_pcharge); pcharge=None
+                    '''if irank == 0:
+                        print('LMO rem', self.nlmo_close)
+                        print('FIT rem', self.naux_close)'''
+            max_memory = get_mem_spare(mol, 0.9)
+            if shell_slice_rank is not None:
+                ao0, ao1 = ao_slice[irank][0], ao_slice[irank][1]
+                nao_rank = ao1 - ao0
+                if with_k:
+                    #loc_df = False
+                    if loc_df:
+                        file_alip = h5py.File('%s/alip_%d.tmp'%(self.dir_alip, irank), 'w')
+                        naux_tot = 0
+                        for i in range(nocc):
+                            if self.naux_close[i] > 0:
+                                file_alip.create_dataset(str(i), (nao_rank, self.naux_close[i]), dtype='f8')
+                                naux_tot += self.naux_close[i]
+                    else:
+                        if nocc != self.nocc_pre:
+                            file_alip = h5py.File('%s/alip_%d.tmp'%(self.dir_alip, irank), 'w')
+                            alip_save = file_alip.create_dataset('alip', (nao_rank, nocc, naoaux), dtype='f8')
+                        else:
+                            file_alip = h5py.File('%s/alip_%d.tmp'%(self.dir_alip, irank), 'r+')
+                            alip_save = file_alip['alip']
+                
+                if with_j:
+                    if irank_shm== 0:
+                        gamma_q = gammaq_node
+                        #size_sub = nocc*naoaux
+                    else:
+                        gamma_q = np.zeros(naoaux)
+                size_ialp, size_feri, shell_slice_rank = mem_control(mol, nocc, naoaux, shell_slice_rank, "half_trans", max_memory)
+                buf_ialp = np.empty(size_ialp)
+                buf_feri = np.empty(size_feri)
+                SHELL_SEG = slice2seg(mol, shell_slice_rank, max_nao=size_ialp//(nocc*naoaux))
+                ao_idx0 = 0
+                if self.use_gpu:
+                    dm_gpu = cupy.asarray(dm)
+                    mocc_gpu = cupy.asarray(self.mocc)
+                for seg_i in SHELL_SEG:
+                    A0, A1 = seg_i[0][0], seg_i[-1][1]
+                    AL0, AL1 = ao_loc[A0], ao_loc[A1]
+                    nao_seg = AL1 - AL0
+                    if with_k:
+                        alip_tmp = buf_ialp[:nao_seg*nocc*naoaux].reshape(nao_seg, nocc, naoaux)
+                        alip_tmp[:] = 0
+                        buf_idx0 = 0
+                    for a0, a1, b_list in seg_i:
+                        al0, al1 = ao_loc[a0], ao_loc[a1]
+                        nao0 = al1 - al0
+                        buf_idx1 = buf_idx0 + nao0
+                        for b0, b1 in b_list:
+                            be0, be1 = ao_loc[b0], ao_loc[b1]
+                            nao1 = be1 - be0
+                            s_slice = (a0, a1, b0, b1, mol.nbas, mol.nbas+auxmol.nbas)
+                            t1 = time_now()
+                            feri_tmp = aux_e2(mol, auxmol, intor='int3c2e_sph', aosym='s1', comp=1, shls_slice=s_slice, out=buf_feri).transpose(1,0,2) #(nao1, nao0, naoaux)
+                            self.t_feri += time_now() - t1
+                            if self.use_gpu:
+                                max_nao_gpu = int(0.8*(self.gpu_memory*1e6) // (8*(nao1 + nocc)*naoaux))
+                                #print(nao0, max_nao_gpu)
+                                max_nao_gpu = max(1, min(nao0, max_nao_gpu))
+                                bidx0 = buf_idx0
+                                gidx0 = 0
+                                for ga0 in np.arange(al0, al1, step=max_nao_gpu):
+                                    ga1 = min(al1, ga0+max_nao_gpu)
+                                    nao2 = ga1 - ga0
+                                    bidx1 = bidx0 + nao2
+                                    gidx1 = gidx0 + nao2
+                                    feri_gpu = cupy.asarray(feri_tmp[:, gidx0:gidx1])
+                                    if with_j:
+                                        #For J matrix
+                                        t1 = time_now()
+                                        gamma_gpu = cupy.dot(dm_gpu[be0:be1, ga0:ga1].ravel(), feri_gpu.reshape(-1, naoaux))
+                                        gamma_q += cupy.asnumpy(gamma_gpu)
+                                        self.t_j += time_now() - t1
+                                    if with_k:
+                                        #For K matrix
+                                        t1 = time_now()
+                                        alip_gpu = cupy.dot(mocc_gpu[be0:be1].T, feri_gpu.reshape(nao1, -1))
+                                        alip_tmp[bidx0:bidx1] += cupy.asnumpy(alip_gpu).reshape(nocc, -1, naoaux).transpose(1, 0, 2)#.reshape(-1, naoaux)
+                                        
+                                        if irank == 0:
+                                            print_mem('Half trans', self.pid_list, log)
+                                        self.t_k += time_now() - t1
+                                    bidx0 = bidx1
+                                    gidx0 = gidx1
+                            else:
+                                if with_j:
+                                    #For J matrix
+                                    t1 = time_now()
+                                    gamma_q += ddot(dm[be0:be1, al0:al1].ravel(), feri_tmp.reshape(-1, naoaux))
+                                    self.t_j += time_now() - t1
+                                if with_k:
+                                    #For K matrix
+                                    t1 = time_now()
+                                    alip_tmp[buf_idx0:buf_idx1] += ddot(self.mocc[be0:be1].T, feri_tmp.reshape(nao1, -1)).reshape(nocc, nao0, naoaux).transpose(1, 0, 2)#.reshape(-1, naoaux)
+                                    if irank == 0:
+                                        print_mem('Half trans', self.pid_list, log)
+                                    self.t_k += time_now() - t1
+                        buf_idx0 = buf_idx1
+                    if with_k:
+                        ao_idx1 = ao_idx0 + nao_seg
+                        t1 = time_now()
+                        if loc_df:
+                            for i in range(nocc):
+                                if self.naux_close[i] > 0:
+                                    file_alip[str(i)].write_direct(alip_tmp[i], dest_sel=np.s_[ao_idx0:ao_idx1])
+                                
+                        else:
+                            alip_save.write_direct(alip_tmp, dest_sel=np.s_[ao_idx0:ao_idx1])
+                        self.t_write += time_now() - t1
+                        ao_idx0 = ao_idx1
+                    
+                if with_j and irank_shm!= 0:
+                    Accumulate_GA_shm(win_gammaq, gammaq_node, gamma_q)
+                    gamma_q = None
+                if with_k:
+                    buf_alip = None
+                    file_alip.close()
+            #fence_and_free(win_low)
+            comm_shm.Barrier()
+            if with_j:
+                win_gammaq_col = get_win_col(gammaq_node)
+                Accumulate_GA(win_gammaq_col, gammaq_node)
+                win_gammaq_col.Fence()
+                if irank == 0:
+                    t1 = time_now()
+                    j2c = read_file('j2c_hf.tmp', 'j2c')#, buffer=low_node)#buf_pq)
+                    scipy.linalg.solve(j2c, gammaq_node, overwrite_b=True)     
+                    self.t_j += time_now() - t1       
+                    j2c = None
+                comm.Barrier()
+                #buf_pq = None
+                if irank_shm== 0 and irank != 0:
+                    Get_GA(win_gammaq_col, gammaq_node)
+                fence_and_free(win_gammaq_col)
+            else:
+                win_gammaq, gammaq_node = None, None
+            return win_gammaq, gammaq_node
+
+        #Step 2 for J matrix
+        def get_j(vj_node):
+            shell_slice_rank = int_prescreen.get_slice_rank(mol, self.shell_slice)
+            max_memory = get_mem_spare(mol, 0.9)
+            if shell_slice_rank is not None:
+                size_feri, shell_slice_rank = mem_control(mol, nocc, naoaux, shell_slice_rank, 0.9, max_memory)
+                buf_feri = np.empty(size_feri)
+                if self.use_gpu:
+                    gammaq_gpu = cupy.asarray(gammaq_node)
+                if irank_shm== 0:
+                    vj = vj_node
+                else:
+                    vj = np.zeros((nao, nao))
+                for idx, si in enumerate(shell_slice_rank):
+                    a0, a1, b0, b1 = si
+                    #s_slice = (a0, a1, b0, b1, mol.nbas, mol.nbas+auxmol.nbas)
+                    s_slice = (b0, b1, a0, a1, mol.nbas, mol.nbas+auxmol.nbas)
+                    t1 = time_now()
+                    feri_tmp = aux_e2(mol, auxmol, intor='int3c2e_sph', aosym='s1', comp=1, shls_slice=s_slice, out=buf_feri).transpose(1,0,2)
+                    self.t_feri += time_now() - t1
+                    al0, al1 = ao_loc[a0], ao_loc[a1]
+                    be0, be1 = ao_loc[b0], ao_loc[b1]
+                    nao0 = al1 - al0
+                    nao1 = be1 - be0
+                    if self.use_gpu:
+                        max_nao_gpu = int(0.8*(self.gpu_memory*1e6) // (8*nao1*(naoaux+1)))
+                        #print(nao0, max_nao_gpu)
+                        max_nao_gpu = max(1, min(nao0, max_nao_gpu))
+                        
+                        gidx0 = 0
+                        for ga0 in np.arange(al0, al1, step=max_nao_gpu):
+                            ga1 = min(al1, ga0+max_nao_gpu)
+                            nao2 = ga1 - ga0
+                            gidx1 = gidx0 + nao2
+                            feri_gpu = cupy.asarray(feri_tmp[gidx0:gidx1])
+                            t1 = time_now()
+                            vj_gpu = cupy.dot(feri_gpu.reshape(-1, naoaux), gammaq_gpu).reshape(-1, nao1)
+                            vj[ga0:ga1, be0:be1] += cupy.asnumpy(vj_gpu)
+                            self.t_j += time_now() - t1
+                            gidx0 = gidx1
+                    else:
+                        t1 = time_now()
+                        vj[al0:al1, be0:be1] += ddot(feri_tmp.reshape(-1, naoaux), gammaq_node).reshape(nao0, nao1)
+                        self.t_j += time_now() - t1
+                buf_feri = None
+            else:
+                vj = None
+            return vj
+        
+
+        #Step 2 for K matrix
+        def get_k(vk_node):
+            if abs(self.delta_e) < self.conv_tol * 100:
+                near_conv = True
+            else:
+                near_conv = False
+            if (self.ml_test) and (near_conv) and (self.ml_mp2int == False):
+                self.dir_ialp = "ialp_mo_hf_tmp"
+                if irank == 0:
+                    os.makedirs(self.dir_ialp, exist_ok=True)
+                comm.Barrier()
+            ao_slice = int_prescreen.get_slice_rank(mol, self.shell_slice, aslice=True)[0]
+            address_alip = []
+            for rank_i, slice_i in enumerate(ao_slice):
+                if slice_i is not None:
+                    ao0, ao1 = slice_i
+                    address_alip.append([rank_i, slice_i])
+            idx_break = irank%len(address_alip)
+            address_alip = address_alip[idx_break:] + address_alip[:idx_break]
+            mo_slice = get_slice(job_size=nocc, rank_list=range(nrank))[irank]
+            win_low, low_node = get_shared((naoaux, naoaux))
+            if irank_shm== 0:
+                t1 = time_now()
+                if loc_df:
+                    read_file('j2c_hf.tmp', 'j2c', buffer=low_node)
+                else:
+                    read_file('j2c_hf.tmp', 'low', buffer=low_node)
+                self.t_read += time_now() - t1
+            comm_shm.Barrier()
+            if mo_slice is not None:
+                if irank_shm== 0:
+                    vk = vk_node
+                else:
+                    vk = np.zeros((nao, nao))
+                if loc_df:
+                    naux_tot = sum([self.naux_close[i] for i in mo_slice])
+                    size_sub = nao*max(self.naux_close)
+                else:
+                    size_sub = nao*naoaux
+                nocc_rank = len(mo_slice)
+            else:
+                size_sub = None
+                nocc_rank = None
+            mem_avail = get_mem_spare(mol)
+            max_memory = mem_avail - (8*naoaux*naoaux*1e-6)
+            if max_memory < 0:
+                raise MemoryError("No sufficient memory")
+            max_mo = get_buff_len(mol, size_sub=size_sub, ratio=0.4, max_len=nocc_rank, max_memory=max_memory)
+            if mo_slice is not None:
+                buf_alip = np.empty(max_mo*size_sub)
+                mo0, mo1 = mo_slice[0], mo_slice[-1]+1
+                mo_idx = np.append(np.arange(mo0, mo1, step=max_mo), mo1)
+                mo_seg = [[mo0, mo1] for mo0, mo1 in zip(mo_idx[:-1], mo_idx[1:])]
+                #j2c = read_file('j2c_hf.tmp', 'j2c')
+                if self.use_gpu:
+                    low_gpu = cupy.asarray(low_node)
+                    vk_gpu = cupy.zeros((nao, nao))
+                for mo_i in mo_seg:
+                    mo0, mo1 = mo_i
+                    nocc_seg = mo1 - mo0
+                    if loc_df:
+                        alip_tmp = [None]*nocc
+                        idx_buf0 = 0
+                        for i in range(mo0, mo1):
+                            if self.naux_close[i] > 0: 
+                                idx_buf1 = idx_buf0 + nao * self.naux_close[i]
+                                try:
+                                    alip_tmp[i] = buf_alip[idx_buf0:idx_buf1].reshape(nao, self.naux_close[i])
+                                except ValueError:
+                                    print(idx_buf0, idx_buf1, nao, self.naux_close[i], buf_alip.shape)
+                                alip_tmp[i][:] = 0.0
+                                idx_buf0 = idx_buf1
+                    else:
+                        alip_tmp = buf_alip[:nao*nocc_seg*naoaux].reshape(nao, nocc_seg, naoaux)
+                    
+                    t1 = time_now()
+                    for si in address_alip:
+                        rank_i, idx_list = si
+                        ao0, ao1 = idx_list
+                        with h5py.File('%s/alip_%d.tmp'%(self.dir_alip, rank_i), 'r') as f:
+                            if loc_df:
+                                for i in range(mo0, mo1):
+                                    if self.naux_close[i] > 0: 
+                                        f[str(i)].read_direct(alip_tmp[i], dest_sel=np.s_[ao0:ao1])
+                            else:
+                                #f['alip'].read_direct(alip_tmp, source_sel=np.s_[:, mo0:mo1], dest_sel=np.s_[ao0:ao1])
+                                f['alip'].read_direct(alip_tmp[ao0:ao1], source_sel=np.s_[:, mo0:mo1])
+                                #alip_tmp[ao0:ao1] = f['alip'][:, mo0:mo1]
+                    self.t_read += time_now() - t1
+
+                    t1 = time_now()
+                    if loc_df:
+                        for i in range(mo0, mo1):
+                            if self.naux_close[i] > 0: 
+                                naux_i = self.naux_close[i]
+                                low_tmp = np.empty((naux_i, naux_i))
+                                idx_p0 = 0
+                                for p0, p1 in self.fit_close[i]:
+                                    idx_p1 = idx_p0 + (p1-p0)
+                                    idx_q0 = 0
+                                    for q0, q1 in self.fit_close[i]:
+                                        idx_q1 = idx_q0 + (q1-q0)
+                                        low_tmp[idx_p0:idx_p1, idx_q0:idx_q1] = low_node[p0:p1, q0:q1]
+                                        idx_q0 = idx_q1
+                                    idx_p0 = idx_p1
+                                low_tmp = scipy.linalg.cholesky(low_tmp, lower=True, overwrite_a=True, check_finite=False)
+
+                                scipy.linalg.solve_triangular(low_tmp, alip_tmp[i].T, lower=True, overwrite_b=True, check_finite=False)
+
+                                vki = ddot(alip_tmp[i], alip_tmp[i].T)
+                                #(vki, '%d'%i)
+                                vk += vki
+                    else:
+                        alip_tmp = alip_tmp.reshape(-1, naoaux)
+                        #ddot(alip_tmp, low_node, out=alip_tmp)
+                        if self.use_gpu:
+                            alip_tmp = alip_tmp.reshape(nao, -1, naoaux)
+                            max_no_gpu = int(0.3*(self.gpu_memory*1e6) // (8*nao*naoaux))
+                            max_no_gpu = max(1, min(nocc_seg, max_no_gpu))
+                            iidx0 = 0
+                            for i0 in np.arange(mo0, mo1, step=max_no_gpu):
+                                i1 = min(mo1, i0+max_no_gpu)
+                                iidx1 = iidx0 + (i1 - i0)
+                                alip_gpu = cupy.asarray(alip_tmp[:, iidx0:iidx1]).reshape(-1, naoaux)
+                                cupyx.scipy.linalg.solve_triangular(low_gpu, alip_gpu.T, lower=True, overwrite_b=True, check_finite=False)
+                                #alip_tmp[:, iidx0:iidx1] = cupy.asnumpy(alip_gpu).reshape(nao, -1, naoaux)
+                                alip_gpu = alip_gpu.reshape(nao, -1)
+                                vk_gpu += cupy.dot(alip_gpu, alip_gpu.T)
+                                iidx0 = iidx1
+                            vk += cupy.asnumpy(vk_gpu)
+                        else:
+                            scipy.linalg.solve_triangular(low_node, alip_tmp.T, lower=True, overwrite_b=True, check_finite=False)
+                            pre_fact = self.mo_occ[self.mo_occ>0]**0.5
+                            if (self.ml_test) and (near_conv) and (self.ml_mp2int == False):
+                                alip_tmp = alip_tmp.reshape(nao, -1, naoaux)
+                                for mo_idx, i in enumerate(range(mo0, mo1)):
+                                    if self.use_frozen and i < self.nocc_core: continue
+                                    with h5py.File("%s/ialp_%d.tmp"%(self.dir_ialp, i), "w") as file_ialp:
+                                        file_ialp.create_dataset('ialp', shape=(nao, naoaux), dtype='f8')
+                                        file_ialp['ialp'][:] = alip_tmp[:, mo_idx]/pre_fact[i]
+                            alip_tmp = alip_tmp.reshape(nao, -1)
+                            vk += ddot(alip_tmp, alip_tmp.T)
+                    self.t_k += time_now() - t1
+            else:
+                vk = None   
+            free_win(win_low); low_node=None
+            #sys.exit()
+            return vk
+
+
+        if (hasattr(self, 'nocc_pre')==False):
+            t0 = time_now()
+            self.dir_alip = "alip_tmp"
+            if irank == 0:
+                with h5py.File('j2c_hf.tmp', 'w') as f:
+                    j2c = auxmol.intor('int2c2e', hermi=1)
+                    f.create_dataset('j2c', data=j2c)
+                    low = scipy.linalg.cholesky(j2c, lower=True, overwrite_a=True)
+                    f.create_dataset('low', data=low)
+                j2c, low = None, None
+                make_dir(self.dir_alip)
+            self.nocc_pre = None
+            print_time([['j2c and CD', time_now()-t0]], log=log)
+            comm.Barrier()
+        if self.shell_slice is None:
+            self.shell_slice = int_prescreen.shell_prescreen(mol, auxmol, log, shell_slice=self.shell_slice, shell_tol=self.shell_tol)
+
+        win_vj, vj_node = get_shared((nao, nao))
+        win_vk, vk_node = get_shared((nao, nao))
+        comm.Barrier()
+        t0 = time_now()
+        win_gammaq, gammaq_node = get_alip_gammaq()
+        if irank == 0:
+            print_mem('Half trans (%.2f secs)'%(time_now()-t0)[1], self.pid_list, log)
+
+        t0 = time_now()
+        if with_j:
+            vj = get_j(vj_node)
+            free_win(win_gammaq)
+        if irank == 0:
+            print_mem('J matrix (%.2f secs)'%(time_now()-t0)[1], self.pid_list, log)
+
+        t0 = time_now()
+        if with_k:
+            vk = get_k(vk_node)
+        if irank == 0:
+            print_mem('K matrix (%.2f secs)'%(time_now()-t0)[1], self.pid_list, log)
+        self.nocc_pre = nocc
+    else:
+        nao_pair = nao*(nao+1)//2
+        if self.outcore:
+            self.file_feri = h5py.File('%s/feri_tmp_%d.tmp'%(self.dir_feri, irank), 'r')
+        aux_slice = get_auxshell_slice(auxmol)[0][irank]
+        if jk_opt == 0:
+            win_vj, vj_node = get_shared((nao, nao))
+            win_vk, vk_node = get_shared((nao, nao))
+            if aux_slice is not None:
+                if irank_shm== 0:
+                    if with_j: vj = vj_node
+                    if with_k: vk = vk_node
+                else:
+                    if with_j: vj = numpy.zeros((nao, nao), dtype='f8')
+                    if with_k: vk = numpy.zeros((nao, nao), dtype='f8')
+                buf_feri = np.empty((nao, nao))
+                for idx, num in enumerate(aux_slice):
+                    if self.use_ga:
+                        cderi = lib.numpy_helper.unpack_tril(self.feri_aux[idx], out=buf_feri)
+                    else:
+                        cderi = lib.numpy_helper.unpack_tril(dfobj._cderi[num], out=buf_feri)
+                    if with_j: vj += (cderi*np.dot(cderi.ravel(), dm.ravel()))#.T
+                    if with_k: vk += multi_dot([cderi, dm, cderi])#.T
+            else:
+                vj, vk = None, None
+        else:
+            win_vj, vj_node = get_shared((1, nao_pair))
+            win_vk, vk_node = get_shared((1, nao, nao))
+            if aux_slice is not None:
+                if irank_shm== 0:
+                    if with_j: vj = vj_node
+                    if with_k: vk = vk_node
+                else:
+                    if with_j: vj = numpy.zeros((1, nao_pair), dtype='f8')
+                    if with_k: vk = numpy.zeros((1, nao, nao), dtype='f8')
+                if with_k:
+                    fmmm = _ao2mo.libao2mo.AO2MOmmm_bra_nr_s2
+                    fdrv = _ao2mo.libao2mo.AO2MOnr_e2_drv
+                    ftrans = _ao2mo.libao2mo.AO2MOtranse2_nr_s2
+                    null = lib.c_null_ptr()
+
+                dms = numpy.asarray(dm)
+                dm_shape = dms.shape
+                dms = dms.reshape(-1,nao,nao)
+                nset = dms.shape[0]
+                if with_j:
+                    idx = numpy.arange(nao)
+                    dmtril = lib.pack_tril(dms + dms.conj().transpose(0,2,1))
+                    dmtril[:,idx*(idx+1)//2+idx] *= .5
+                if with_k:
+                    rargs = (ctypes.c_int(nao), (ctypes.c_int*4)(0, nao, 0, nao),
+                            null, ctypes.c_int(0))
+                    dms = [numpy.asarray(x, order='F') for x in dms]
+                max_len = len(aux_slice)
+            else:
+                max_len = None
+            blksize = get_buff_len(mol, size_sub=nao**2, ratio=0.22, max_len=max_len)
+            if aux_slice is not None:
+                buf = numpy.empty((2,blksize,nao,nao))
+                for eri1 in feri_slice(self, dfobj, blksize):
+                    naux, nao_pair = eri1.shape
+                    if with_j:
+                        tt1 = time_now()
+                        rho = numpy.einsum('ix,px->ip', dmtril, eri1)
+                        vj += numpy.einsum('ip,px->ix', rho, eri1)
+                    if with_k:
+                        for k in range(nset):
+                            buf1 = buf[0,:naux]
+                            fdrv(ftrans, fmmm,
+                                buf1.ctypes.data_as(ctypes.c_void_p),
+                                eri1.ctypes.data_as(ctypes.c_void_p),
+                                dms[k].ctypes.data_as(ctypes.c_void_p),
+                                ctypes.c_int(naux), *rargs)
+                            buf2 = lib.unpack_tril(eri1, out=buf[1])
+                            #vk[k] += np.dot(buf1.reshape(-1,nao).T, buf2.reshape(-1,nao))
+                            vk[k] += lib.dot(buf1.reshape(-1,nao).T, buf2.reshape(-1,nao))
+                #t1 = print_time(['jk', time_elapsed(t1)], log)
+            else:
+                vj, vk = None, None
+            if rijcosx:
+                vk = get_jk_rijcosx(self, dm, hermi=1, with_j=False, with_k=True, direct_scf_tol=1e-8, grids_thrd=1e-10, log=log)[1]
+                if irank_shm== 0:
+                    vk_node[:] = vk
+        if self.outcore:
+            self.file_feri.close()
+    if irank_shm!= 0:
+        if (vj is not None):
+            Accumulate_GA_shm(win_vj, vj_node, vj)
+        if vk is not None:
+            Accumulate_GA_shm(win_vk, vk_node, vk)
+    comm.Barrier()
+    if nnode > 1:
+        vj_node = collect_dm(vj_node)
+        vk_node = collect_dm(vk_node)
+
+    if irank == 0:
+        vj = np.zeros((nao, nao))
+        vk = np.zeros((nao, nao))
+        if (self.direct_int==False) and (jk_opt == 1):
+            vj[:] = lib.unpack_tril(vj_node, 1).reshape(nao, nao)
+            vk[:] = vk_node.reshape(nao, nao)
+        else:
+            vj[:] = vj_node
+            vk[:] = vk_node
+    else:
+        vj, vk = None, None
+    #sys.exit()
+    comm_shm.Barrier()
+    for win in [win_vj, win_vk]:
+        free_win(win)
+    #print_time(['df vj and vk', time_elapsed(tt)], log)
+    return vj, vk
+
+def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
+    t0 = time_now()
+    if mol is None: mol = self.mol
+    if dm is None: dm = make_rdm1()
+    if irank_shm== 0 and irank != 0:
+        vhf = np.zeros((self.nao, self.nao), dtype='f8')
+    else:
+        vhf = None
+    if self._eri is not None or not self.direct_int:
+        vj, vk = get_jk(self, self.with_df, dm, hermi)
+        if irank == 0:
+            if self.direct_int:
+                self.vk_last = np.copy(vk)
+            vhf = vj - vk * .5
+    else:
+        ddm = numpy.asarray(dm) - numpy.asarray(dm_last)
+        vj, vk = get_jk(self, self.with_df, ddm, hermi)
+        if irank == 0:
+            if self.direct_int:
+                if self.vk_last is None:
+                    self.vk_last = np.copy(vk)
+                else:
+                    vk_copy = np.copy(vk)
+                    vk -= self.vk_last
+                    self.vk_last = vk_copy
+            vhf = vj - vk * .5 + vhf_last
+    if self.nnode > 1:
+        comm.Barrier()
+        vhf = bcast_dm(vhf)
+    self.t_jk += time_now() - np.asarray(t0)
+    return vhf
+
+def get_occ(self, mo_energy=None, mo_coeff=None):
+    if mo_energy is None: mo_energy = self.mo_energy
+    e_idx = numpy.argsort(mo_energy)
+    e_sort = mo_energy[e_idx]
+    nmo = mo_energy.size
+    mo_occ = numpy.zeros(nmo)
+    nocc = self.mol.nelectron // 2
+    mo_occ[e_idx[:nocc]] = 2
+    if self.verbose >= logger.DEBUG:
+        numpy.set_printoptions(threshold=nmo)
+        logger.debug(self, '  mo_energy =\n%s', mo_energy)
+        numpy.set_printoptions(threshold=1000)
+    return mo_occ
+
+def energy_elec(mf, dm=None, h1e=None, vhf=None):
+    e1 = numpy.einsum('ij,ji->', h1e, dm)
+    e_coul = numpy.einsum('ij,ji->', vhf, dm) * .5
+    mf.scf_summary['e1'] = e1.real
+    mf.scf_summary['e2'] = e_coul.real
+    logger.debug(mf, 'E1 = %s  E_coul = %s', e1, e_coul)
+    return (e1+e_coul).real, e_coul
+
+
+def energy_tot(mf, dm=None, h1e=None, vhf=None):
+    nuc = mf.energy_nuc()
+    if mf.mol_mm is not None:
+        nuc = qmmm.energy_nuc_qmmm(mf, nuc)
+    e_tot = mf.energy_elec(dm, h1e, vhf)[0] + nuc
+    mf.scf_summary['nuc'] = nuc.real
+    return e_tot
+
+def ml_rhf(self, log):
+    self.no = self.mol.nelectron//2
+    self.mo_list = list(range(self.no))
+    if self.use_frozen:
+        self.mo_list = self.mo_list[self.nocc_core:]
+    self.nocc = len(self.mo_list)
+
+    #MO localization
+    log.info('\n--------------------------------Localization---------------------------------')
+    self.win_o, self.o = get_shared((self.nao, self.no))
+    self.win_eo, self.eo = get_shared(self.no)
+    self.win_loc, self.loc_fock = get_shared((self.no, self.no))
+    self.win_uo, self.uo = get_shared((self.no, self.no))
+    if irank_shm == 0:
+        if self.chkfile_loc is not None:
+            with h5py.File(self.chkfile_loc, 'r') as f:
+                f['o'].read_direct(self.o)
+                f['eo'].read_direct(self.eo)
+                f['loc_fock'].read_direct(self.loc_fock)
+                f['uo'].read_direct(self.uo)
+        else:
+            self.uo[:] = loc_addons.localization(self.mol, self.mo_coeff[:, self.mo_occ>0], local_type=self.local_type, 
+                                    frozen=self.use_frozen, pop_method=self.pop_method, verbose=self.verbose, 
+                                    log=log)
+            #print(self.uo)
+            ddot(self.mo_coeff[:, self.mo_occ>0], self.uo, out=self.o)
+            self.loc_fock[:] = multi_dot([self.uo.T, np.diag(self.mo_energy[:self.no]), self.uo])
+            self.eo[:] = np.diag(self.loc_fock)
+            if irank == 0:
+                with h5py.File('loc_var.chk', 'w') as f:
+                    f.create_dataset("uo", data=self.uo)
+                    f.create_dataset("o", data=self.o)
+                    f.create_dataset("loc_fock", data=self.loc_fock)
+                    f.create_dataset("eo", data=self.eo)
+                if self.chkfile_save is not None:
+                    #os.system("cp %s %s"('loc_var.chk', self.chkfile_save))
+                    if self.local_type == 1:
+                        dir_loc = "%s/pm"%self.chkfile_save
+                    elif self.local_type == 2:
+                        dir_loc = "%s/boys"%self.chkfile_save
+                    os.makedirs(dir_loc, exist_ok=True)
+                    shutil.copy('loc_var.chk', dir_loc)
+    comm_shm.Barrier()
+
+    log.info('\n--------------------------------Localized MO integrals---------------------------------')
+    if (self.direct_int) and (self.chkfile_hf is None):
+        tt = time_now()
+
+        t0 = time_now()
+        dir_ialp_ao = "ialp_ao_hf_tmp"
+        if irank == 0:
+            os.makedirs(dir_ialp_ao, exist_ok=True)
+        comm.Barrier()
+        #Load ialp and transform it to the localized one
+        ao_slice = get_slice(range(nrank), job_size=self.nao)
+        address_ao = []
+        for rank_i, ao_list in enumerate(ao_slice):
+            if ao_list is not None:
+                address_ao.append([rank_i, [ao_list[0], ao_list[-1]+1]])
+        max_memory = get_mem_spare(self.mol)
+        ao_slice = ao_slice[irank]
+        if ao_slice is not None:
+            max_ao = get_buff_len(self.mol, size_sub=self.nocc*self.naoaux, ratio=0.4, max_len=(len(ao_slice)), min_len=1, max_memory=max_memory)
+            with h5py.File("%s/ialp_ao_%s.tmp"%(dir_ialp_ao, irank), "w") as file_ialp_ao:
+                file_ialp_ao.create_dataset("ialp", shape=(self.nocc, len(ao_slice), self.naoaux), dtype="f8")
+                buff_ialp = np.empty((self.nocc*self.naoaux*max_ao))
+                for al_idx0 in np.arange(len(ao_slice), step=max_ao):
+                    al_idx1 = min(al_idx0 + max_ao, len(ao_slice))
+                    al0, al1 = ao_slice[al_idx0], ao_slice[al_idx1-1]+1
+                    ialp_tmp = buff_ialp[:(al_idx1-al_idx0)*self.nocc*self.naoaux].reshape(self.nocc, -1, self.naoaux)
+                    for mo_idx, i in enumerate(self.mo_list):
+                        with h5py.File("%s/ialp_%d.tmp"%(self.dir_ialp, i), "r") as fread:
+                            ialp_tmp[mo_idx] = fread["ialp"][al0:al1]
+                    if self.use_frozen:
+                        uo = self.uo[self.nocc_core:, self.nocc_core:]
+                    else:
+                        uo = self.uo
+                    np.dot(uo.T, ialp_tmp.reshape(self.nocc, -1), out=ialp_tmp.reshape(self.nocc, -1))
+                    file_ialp_ao["ialp"][:, al_idx0:al_idx1] = ialp_tmp
+        comm.Barrier()
+        print_time(['MO to AO collection', time_elapsed(t0)], log)
+        
+        t0 = time_now()
+        #collect ialp based on MOs
+        if self.loc_fit:
+            win_fit, aux_ratio_fit = get_shared((self.no, self.naoaux))
+        mo_slice = get_slice(range(nrank), job_list=self.mo_list)[irank]
+        if mo_slice is not None:
+            max_mo = get_buff_len(self.mol, size_sub=self.nao*self.naoaux, ratio=0.4, max_len=(len(mo_slice)), min_len=1, max_memory=max_memory)
+            buff_ialp = np.empty((max_mo*self.nao*self.naoaux))
+            for i_idx0 in np.arange(len(mo_slice), step=max_mo):
+                i_idx1 = min(i_idx0 + max_mo, len(mo_slice))
+                i0, i1 = mo_slice[i_idx0], mo_slice[i_idx1-1]+1
+                ialp_tmp = buff_ialp[:(i1-i0)*self.nao*self.naoaux].reshape(-1, self.nao, self.naoaux)
+                for rank_i, (al0, al1) in address_ao:
+                    with h5py.File("%s/ialp_ao_%s.tmp"%(dir_ialp_ao, rank_i), "r") as file_ialp_ao:
+                        ialp_tmp[:, al0:al1] = file_ialp_ao["ialp"][(i0-self.nocc_core):(i1-self.nocc_core)]
+                for i_idx, i in enumerate(range(i0, i1)):
+                    with h5py.File("%s/ialp_%d.tmp"%(self.dir_ialp, i), "r+") as f_ialp:
+                        f_ialp["ialp"][:] = ialp_tmp[i_idx]
+        print_time(['local transformation', time_elapsed(t0)], log)
+        comm.Barrier()
+        if self.loc_fit:
+            aux_ratio_fit[i] = np.sum(ialp_tmp[i_idx]**2, axis=0)
+            self.fit_list, self.fit_seg, self.nfit = loc_addons.get_fit_domain(self.mol, self.with_df.auxmol, aux_ratio_fit, self.fit_tol)
+            self.atom_close, self.bfit_seg, self.nbfit, self.cal_seg = loc_addons.get_bfit_domain(self.mol, self.with_df.auxmol, aux_ratio_fit, self.fit_tol, use_group=False)
+            ave_nfit = np.sum(self.nfit)/len(self.mo_list)
+            ave_nbfit = np.sum(self.nbfit)/len(self.mo_list)
+            log.info('\nAverage local fitting basis for RHF (full %d):'%self.naoaux)
+            msg_list = [['Fitting (%.1E):'%self.fit_tol, int(ave_nfit)],
+                        ['Block fitting (%.1E):'%self.fit_tol, int(ave_nbfit)]]
+            print_align(msg_list, align='lr', indent=4, log=log)
+        if irank == 0:
+            #os.system("rm -r %s"%dir_ialp_ao)
+            shutil.rmtree(dir_ialp_ao)
+        print_time(['localized ialp', time_elapsed(tt)], log)
+    else:
+        if self.direct_int == False:
+            parallel_eri(self, self.with_df, 'hf', log)
+        self.shell_slice = int_prescreen.shell_prescreen(self.mol, self.with_df.auxmol, log, shell_slice=None, shell_tol=self.shell_tol)
+        get_ialp_GA(self, self.with_df, "hf", log, zvec=False)
+        #  ------------------  TEST ------------------------
+        # mo_slice = get_slice(range(nrank), job_list=self.mo_list)[irank]
+        # if mo_slice is not None:
+        #     print(irank, np.linalg.norm(self.ialp_mo))
+        # sys.exit()
+        #  ------------------  TEST ------------------------
+
+
+def access_chkfile(chkfile, mode, arrays, cycle=None):
+    #The order of the buffer has to be: dm, mo_energy, mo_coeff, mo_occ, mocc, e_tot
+    key_list = ["dm", "mo_energy", "mo_coeff", "mo_occ", "mocc", "e_tot"]
+    array_dic = {}
+    for idx, key_i in enumerate(key_list):
+        array_dic[key_i] = arrays[idx]
+    with h5py.File(chkfile, mode) as f:
+        if mode == 'w':
+            for idx, key_i in enumerate(key_list):
+                f.create_dataset("scf/%s"%key_i, data=array_dic[key_i])
+        else:
+            keys_file = f["scf"].keys()
+            if mode == 'r+':
+                for idx, key_i in enumerate(key_list):
+                    if key_i in keys_file:
+                        f["scf/%s"%key_i].write_direct(array_dic[key_i])
+                    else:
+                        f.create_dataset("scf/%s"%key_i, data=array_dic[key_i])
+            elif mode == 'r':
+                nochk_list = []
+                for idx, key_i in enumerate(key_list):
+                    if array_dic[key_i] is None:
+                        continue
+                    if key_i in keys_file:
+                        f["scf/%s"%key_i].read_direct(array_dic[key_i])
+                    else:
+                        #dm, mocc
+                        nochk_list.append(key_i)
+                for key_i in nochk_list:
+                    if key_i == "dm":
+                        array_dic[key_i][:] = make_rdm1(array_dic["mo_coeff"], array_dic["mo_occ"])
+
+    if mode == 'r':
+        return arrays
+    '''elif self.chkfile_save is not None:
+        shutil.copy(chkfile, "%s/hf_mat_cycle%d.chk"%(self.chkfile_save, cycle))
+        if cycle > 0:
+            os.remove("%s/hf_mat_cycle%d.chk"%(self.chkfile_save, cycle-1))'''
+
+def kernel(self, conv_tol=1e-8, conv_tol_grad=None,
+           dump_chk=True, dm0=None, callback=None, conv_check=True, **kwargs):
+
+    cput0 = time_now()
+    mol = self.mol
+    self.test = True
+    self.nao = self.mol.nao_nr()
+    self.vk_last = None
+    log = logger.Logger(self.stdout, self.verbose)
+    #self.sol_eps = 78.3553
+    if conv_tol_grad is None:
+        conv_tol_grad = np.sqrt(conv_tol)
+        log.info('Set gradient conv threshold to %g'%conv_tol_grad)
+    t0 = time_now()
+    if irank_shm== 0:
+        h1e = self.get_hcore(mol)
+    else:
+        h1e = None
+    if self.mol_mm is not None:
+        h1e = qmmm.get_hcore_qmmm(self, h1e)
+    print_time([['core Hamiltonian', time_now()-t0]], log=log)
+
+    win_dm, dm = get_shared((self.nao, self.nao))
+    win_conv, conv_hf = get_shared(1, dtype='i')
+    win_nocc, nocc = get_shared(1, dtype='i')
+    self.win_ene_hf, self.mo_energy = get_shared(self.nao, dtype='f8')
+    self.win_occ_hf, self.mo_occ = get_shared(self.nao, dtype='f8')
+    self.win_coef_hf, self.mo_coeff = get_shared((self.nao, self.nao), dtype='f8')
+    win_hfe, hfe = get_shared(1)
+    '''if "opt" in self.cal_mode:
+        if os.path.isfile("hf_mat.chk"):
+            self.chkfile_init = "hf_mat.chk"'''
+    if self.chkfile_init is None:
+        t0 = time_now()
+        if irank_shm== 0:
+            mocc, mo_occ, dm0 = init_guess_by_minao(mol)
+            mocc *= (mo_occ**0.5)
+            #self.mo_occ[:] = mo_occ
+            dm[:] = dm0
+            mo_occ, dm0 = None, None
+            nocc[0] = mocc.shape[-1]
+                
+        comm_shm.Barrier()
+        win_cvi, self.mocc = get_shared((self.nao, nocc[0]), dtype='f8')
+        if irank_shm== 0:
+            self.mocc[:] = mocc
+            mocc = None
+            print_time([['Initial guess of RHF DM', time_now()-t0]], log=log)
+        comm_shm.Barrier()
+        vhf = self.get_veff(mol, dm)
+        free_win(win_cvi); self.mocc = None
+        win_cvi, self.mocc = get_shared((self.nao, self.mol.nelectron//2), dtype='f8')
+    else:
+        win_cvi, self.mocc = get_shared((self.nao, self.mol.nelectron//2), dtype='f8')
+        if irank_shm== 0:
+            access_chkfile(self.chkfile_init, 'r', [dm, self.mo_energy, self.mo_coeff, self.mo_occ, self.mocc, hfe])
+        comm_shm.Barrier()
+        vhf = self.get_veff(mol, dm)
+    if self.sol_eps is not None:
+        if (self.with_solvent.frozen): 
+            if hasattr(self.with_solvent, "e"):
+                e_sol, v_sol = self.with_solvent.e, self.with_solvent.v
+            else:
+                e_sol, v_sol = get_veff_sol(self.with_solvent, dm)
+                self.with_solvent.e, self.with_solvent.v = e_sol, v_sol
+        else:
+            e_sol, v_sol = get_veff_sol(self.with_solvent, dm)
+    if irank_shm == 0:
+        self.e_tot = self.energy_tot(dm, h1e, vhf)
+        if self.sol_eps is not None:
+            self.e_tot += e_sol
+        hfe[0] = self.e_tot
+    comm_shm.Barrier()
+    self.e_tot = hfe[0]
+    logger.info(self, 'init E= %.15g', self.e_tot)
+    
+    self.test = False
+    self.converged = False
+    #mo_energy = mo_coeff = mo_occ = None
+    if irank_shm== 0:
+        s1e = self.get_ovlp(mol)
+        cond = lib.cond(s1e)
+        logger.debug(self, 'cond(S) = %s', cond)
+        if numpy.max(cond)*1e-17 > conv_tol:
+            logger.warn(self, 'Singularity detected in overlap matrix (condition number = %4.3g). '
+                        'SCF may be inaccurate and hard to converge.', numpy.max(cond))
+
+        # Skip SCF iterations. Compute only the total energy of the initial density
+        if self.max_cycle <= 0:
+            if self.sol_eps is not None:
+                fock = self.get_fock(h1e, s1e, vhf+v_sol, dm)
+            else:
+                fock = self.get_fock(h1e, s1e, vhf, dm)  # = h1e + vhf, no DIIS
+            self.mo_energy[:], self.mo_coeff[:] = self.eig(fock, s1e)
+            self.mo_occ[:] = self.get_occ(self.mo_energy, self.mo_coeff)
+            self.mocc[:] = self.mo_coeff[:, self.mo_occ>0]*(self.mo_occ[self.mo_occ>0]**0.5)
+            return self.converged, self.e_tot, self.mo_energy, self.mo_coeff, self.mo_occ
+        if isinstance(self.diis, lib.diis.DIIS):
+            self_diis = self.diis
+        elif self.diis:
+            assert issubclass(self.DIIS, lib.diis.DIIS)
+            self_diis = self.DIIS(self, self.diis_file)
+            self_diis.space = self.diis_space
+            self_diis.rollback = self.diis_space_rollback
+        else:
+            self_diis = None
+        cput1 = print_time(['initialize scf', time_elapsed(cput0)], log)
+    
+    self.chkhf = "hf_mat.chk"
+    self.delta_e = self.e_tot
+    for cycle in range(self.max_cycle):
+        dm_last = np.copy(dm)
+        last_hf_e = self.e_tot
+        
+        if irank_shm== 0:
+            if (self.sol_eps is not None) and (v_sol is not None):
+                fock = self.get_fock(h1e, s1e, vhf+v_sol, dm, cycle, self_diis)
+            else:
+                fock = self.get_fock(h1e, s1e, vhf, dm, cycle, self_diis)
+            self.mo_energy[:], self.mo_coeff[:] = self.eig(fock, s1e)
+            self.mo_occ[:] = self.get_occ(self.mo_energy, self.mo_coeff)
+            self.mocc[:] = self.mo_coeff[:, self.mo_occ>0]*(self.mo_occ[self.mo_occ>0]**0.5)
+            dm[:] = make_rdm1(self.mo_coeff, self.mo_occ)
+            dm[:] = lib.tag_array(dm, mo_coeff=self.mo_coeff, mo_occ=self.mo_occ)
+        comm_shm.Barrier()
+        
+        vhf = self.get_veff(mol, dm, dm_last, vhf)
+        if (self.sol_eps is not None) and (self.with_solvent.frozen is False):
+            e_sol, v_sol = get_veff_sol(self.with_solvent, dm)
+        if irank_shm== 0:
+            self.e_tot = self.energy_tot(dm, h1e, vhf)
+            if self.sol_eps is not None:
+                self.e_tot += e_sol
+            hfe[0] = self.e_tot
+            if irank == 0:
+                if cycle == 0:
+                    access_chkfile(self.chkhf, 'w', [dm, self.mo_energy, self.mo_coeff, self.mo_occ, self.mocc, hfe], cycle)
+                else:
+                    access_chkfile(self.chkhf, 'r+', [dm, self.mo_energy, self.mo_coeff, self.mo_occ, self.mocc, hfe], cycle)
+            
+        comm_shm.Barrier()
+        self.e_tot = hfe[0]
+        self.delta_e = self.e_tot-last_hf_e
+        if irank_shm== 0:
+            norm_gmo = np.linalg.norm(self.get_grad(self.mo_coeff, self.mo_occ, fock))
+            #norm_gmo = norm_gmo / np.sqrt(norm_gmo.size)
+            norm_ddm = np.linalg.norm(dm-dm_last)
+            logger.info(self, 'cycle= %d E= %.12f, delta_E= %.2E, |g|=%.2E, |ddm|=%.2E', cycle+1, self.e_tot, self.delta_e, norm_gmo, norm_ddm)
+            
+            if (abs(self.e_tot-last_hf_e) < conv_tol): #and (norm_gmo < conv_tol_grad):
+                self.converged = True
+            #cput1 = print_time(['cycle= %d'%(cycle+1), time_elapsed(cput1)], log)
+            if self.converged:
+                conv_hf[0] = 1
+        comm_shm.Barrier()
+        self.converged = bool(conv_hf[0])
+        if self.converged:
+            break
+    if self.converged:
+        self.dm = dm
+        if (self.chkfile_save is not None) and (irank == 0):
+            shutil.copy(self.chkhf, self.chkfile_save)
+            os.remove("%s/hf_mat_cycle%d.chk"%(self.chkfile_save, cycle))
+
+    comm.Barrier()
+    free_win(win_hfe)
+    
+    if (irank == 0) and (self.direct_int):
+        shutil.rmtree(self.dir_alip)
+
+        
+def scf_ene(self, dm0=None, **kwargs):
+    #cput0 = time_now()
+    kernel(self, self.conv_tol, self.conv_tol_grad,
+            dm0=dm0, callback=self.callback,
+            conv_check=self.conv_check, **kwargs)
+
+    #print_time(['SCF', time_elapsed(cput0)], log)
+    #self._finalize()
+    return self.e_tot
+
+def add_instance(hf, my_para):
+    hf.__dict__.update(my_para.__dict__)
+    hf.with_df = DF(hf.mol)
+    hf.with_df.auxbasis = hf.auxbasis_hf
+    hf.with_df.auxmol = hf.auxmol_hf
+    hf.chkfile_ialp = hf.chkfile_ialp_hf
+    hf.nao = hf.mol.nao_nr()
+    hf.naoaux = hf.naux_hf
+    hf.nocc_core = loc_addons.get_ncore(hf.mol)
+    if irank == 0:
+        hf.verbose = min(my_para.verbose, 4)
+    hf.shm_ranklist = range(nrank//nnode)
+    hf.t_jk = np.zeros(2)
+    hf.t_k = np.zeros(2)
+    hf.t_j = np.zeros(2)
+    hf.t_feri = np.zeros(2)
+    hf.t_write = np.zeros(2)
+    hf.t_read= np.zeros(2)
+    hf.conv_tol = 1e-8
+    hf.delta_e = 1
+    funcType = types.MethodType
+    hf.get_veff = funcType(get_veff, hf)
+    hf.get_occ = funcType(get_occ, hf)
+    hf.scf = funcType(scf_ene, hf)
+    hf.energy_tot = funcType(energy_tot, hf)
+    hf.shell_slice = None
+    return hf
+def build_solvent(hf, log):
+    if hf.sol_eps is not None:
+        log.info('Set up solvation model with dielectric constant: %.2f'%(hf.sol_eps))
+        t0 = time_now()
+        if hasattr(hf, 'with_solvent') is False:
+            hf.with_solvent = ddcosmo.DDCOSMO(hf.mol)
+            hf.with_solvent.eps = hf.sol_eps
+            hf.with_solvent.frozen = False
+            hf.with_solvent.build()
+            hf.with_solvent.grid_int = None
+            hf.with_solvent.int3c2e = None
+            hf.with_solvent.direct_int = hf.direct_int
+            hf.with_solvent.outcore = hf.outcore
+        print_time([['solvation model setup', time_now()-t0]], log=log)
+    else:
+        hf.with_solvent = None
+def scf_parallel(hf, my_para):
+    t1 = time_now()
+    hf = add_instance(hf, my_para)
+    log = logger.Logger(hf.stdout, hf.verbose)
+    log.info('\n--------------------------------RHF energy---------------------------------')
+    build_solvent(hf, log)
+    if my_para.chkfile_hf is not None:
+        log.info("Read HF matrices from check file: %s"%my_para.chkfile_hf)
+        hf.win_ene_hf, hf.mo_energy = get_shared(hf.nao, dtype='f8')
+        hf.win_occ_hf, hf.mo_occ = get_shared(hf.nao, dtype='f8')
+        hf.win_coef_hf, hf.mo_coeff = get_shared((hf.nao, hf.nao), dtype='f8')
+        hf.win_dm_hf, hf.dm = get_shared((hf.nao, hf.nao), dtype='f8')
+        hf.win_ene_hf, e_tot = get_shared(1, dtype='f8')
+        if irank_shm == 0:
+            '''with h5py.File(my_para.chkfile_hf, 'r') as f:
+                f["scf/mo_energy"].read_direct(hf.mo_energy)
+                f["scf/mo_occ"].read_direct(hf.mo_occ)
+                f["scf/mo_coeff"].read_direct(hf.mo_coeff)
+                f["scf/dm"].read_direct(hf.dm)
+                f["scf/e_tot"].read_direct(e_tot)'''
+
+            arrays = [hf.dm, hf.mo_energy, hf.mo_coeff, hf.mo_occ, None, e_tot]
+            access_chkfile(my_para.chkfile_hf, 'r', arrays)
+        comm_shm.Barrier()
+        print_time(["reading checkfile", time_elapsed(t1)], log)
+        hfe = hf.e_tot = e_tot[0]
+        if hf.direct_int == False and hf.grad_cal:
+            parallel_eri(hf, hf.with_df, 'hf', log)
+        hf.t_hf = time_elapsed(t1)
+        
+    else:
+        if hf.direct_int == False:
+            parallel_eri(hf, hf.with_df, 'hf', log)
+        hfe= hf.kernel()
+        hf.j2c = None
+        hf.t_hf = time_elapsed(t1)
+        #sys.exit()
+        if irank == 0:
+            time_list = []
+            if hf.direct_int:
+                time_list += [['reading', hf.t_read], ['writing', hf.t_write], ['feri', hf.t_feri]]
+            time_list += [['J matrix', hf.t_j], ['K matrix', hf.t_k], ['RHF energy', hf.t_hf]]
+            print_time(time_list, log)
+            print_mem('RHF energy', hf.pid_list, log)
+    if hf.pop_hf:
+        loc_addons.analysis(hf.mol, hf.dm, meth='RHF', charge_method=hf.charge_method, save_data='RHF', log=log)
+    if (hf.ml_test) and (hf.ml_mp2int == False):
+        ml_rhf(hf, log)
+    return hfe
+
+
+

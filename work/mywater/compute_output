@@ -1,0 +1,262 @@
+Basic settings:
+Integral generation: Incore
+Local density fitting: OFF
+Shared disk: OFF
+The molecue to be computed: mywater
+The number of nodes: 1, cores: 2, threads/core: 1
+Maximum memory per node: 10000.00 MB (554824.30 MB used)
+Basis set: def2tzvp
+Auxilary basis for HF: {'O': 'def2-tzvp-jkfit', 'H': 'def2-tzvp-jkfit'}
+Auxilary basis for MP2: {'O': 'def2-tzvp-ri', 'H': 'def2-tzvp-ri'}
+The number of AOs: 43
+The number of occupied MOs: 5
+The number of auxilary basis for RHF: 113
+The number of auxilary basis for MP2: 106
+
+
+--------------------------------RHF energy---------------------------------
+Begin hf 3c2e AO integrals computation...
+AO int comp: t_cpu: 0.08, t_wall: 0.08, mem: 601.08 MB
+AO int col: t_cpu: 0.00, t_wall: 0.00, mem: 602.24 MB
+Set gradient conv threshold to 0.0001
+    CPU time for core Hamiltonian     0.00 sec,  wall time    0.00 sec 
+    CPU time for Initial guess of RHF DM     0.02 sec,  wall time    0.02 sec 
+init E= -75.9037638834654
+    CPU time for initialize scf     0.04 sec,  wall time    0.04 sec 
+cycle= 1 E= -76.023968755361, delta_E= -1.20E-01, |g|=2.42E-14, |ddm|=9.31E-01
+cycle= 2 E= -76.050001030144, delta_E= -2.60E-02, |g|=2.80E-14, |ddm|=3.05E-01
+cycle= 3 E= -76.059215353466, delta_E= -9.21E-03, |g|=2.92E-14, |ddm|=1.12E-01
+cycle= 4 E= -76.059482877702, delta_E= -2.68E-04, |g|=2.38E-14, |ddm|=2.06E-02
+cycle= 5 E= -76.059496579552, delta_E= -1.37E-05, |g|=2.04E-14, |ddm|=7.21E-03
+cycle= 6 E= -76.059497062827, delta_E= -4.83E-07, |g|=2.76E-14, |ddm|=1.42E-03
+cycle= 7 E= -76.059497086189, delta_E= -2.34E-08, |g|=4.53E-14, |ddm|=3.15E-04
+cycle= 8 E= -76.059497086410, delta_E= -2.21E-10, |g|=3.13E-14, |ddm|=3.45E-05
+    CPU time for J matrix       0.00 sec,  wall time    0.00 sec 
+    CPU time for K matrix       0.00 sec,  wall time    0.00 sec 
+    CPU time for RHF energy     0.24 sec,  wall time    0.24 sec 
+    RHF energy, used memory: 613.20 MB
+
+--------------------------------Localization---------------------------------
+Frozen core: ON
+Split localization: ON (1 core orbitals)
+Localization method: Pipek-Mezey with Lowdin-Meta_Lowdin
+Set conv_tol_grad to 0.000316228
+    CPU time for initializing CIAH     0.01 sec,  wall time    0.01 sec 
+macro= 1  f(x)= 2.6055068478516  delta_f= 2.60551  |g|= 0.0528076  1 KF 3 Hx
+macro= 2  f(x)= 2.6361653086173  delta_f= 0.0306585  |g|= 0.0953999  1 KF 3 Hx
+macro= 3  f(x)= 2.6642662649519  delta_f= 0.028101  |g|= 0.104527  1 KF 3 Hx
+macro= 4  f(x)= 2.6798347094589  delta_f= 0.0155684  |g|= 0.0773944  1 KF 3 Hx
+macro= 5  f(x)= 2.6811306963828  delta_f= 0.00129599  |g|= 0.0232628  1 KF 2 Hx
+macro= 6  f(x)= 2.6811310616831  delta_f= 3.653e-07  |g|= 0.000392919  1 KF 1 Hx
+macro= 7  f(x)= 2.6811310616831  delta_f= -1.77636e-15  |g|= 8.38103e-07  1 KF 1 Hx
+macro= 8  f(x)= 2.9348946009277  delta_f= 0.253764  |g|= 0.018796  1 KF 1 Hx
+macro= 9  f(x)= 2.9349200646965  delta_f= 2.54638e-05  |g|= 0.00286459  1 KF 2 Hx
+macro= 10  f(x)= 2.9349200646965  delta_f= 4.44089e-16  |g|= 1.20893e-06  1 KF 1 Hx
+macro X = 10  f(x)= 2.9349200646965  |g|= 1.20893e-06  20 intor 10 KF 20 Hx
+    CPU time for localization     0.16 sec,  wall time    0.16 sec 
+
+----------------------MP2 MO integral transformation------------------------
+Begin mp2 3c2e AO integrals computation...
+AO int comp: t_cpu: 0.02, t_wall: 0.02, mem: 613.88 MB
+AO int col: t_cpu: 0.00, t_wall: 0.00, mem: 613.88 MB
+    CPU time for mp2 3c2e integrals     0.02 sec,  wall time    0.02 sec 
+
+Begin Cauchy-Schwartz prescreening for RHF...
+    CPU time for Schwartz integral     0.00 sec,  wall time    0.00 sec 
+    CPU time for shell pairs selecting     0.00 sec,  wall time    0.00 sec 
+    The threshold for AO pair screening: 1.00E-10
+    0 out of 1849 AO pairs are screened, sparsity: 0.00 percent
+
+Begin Cauchy-Schwartz prescreening for MP2...
+    CPU time for Schwartz integral     0.00 sec,  wall time    0.00 sec 
+    CPU time for shell pairs selecting     0.00 sec,  wall time    0.00 sec 
+    The threshold for AO pair screening: 1.00E-10
+    0 out of 1849 AO pairs are screened, sparsity: 0.00 percent
+
+Begin calculation of (ial|P)...
+    CPU time for computing ialp     0.00 sec,  wall time    0.00 sec 
+    CPU time for collecting ialp     0.00 sec,  wall time    0.00 sec 
+    ialp generation, used memory: 614.82 MB
+    CPU time for ialp generation     0.01 sec,  wall time    0.01 sec 
+
+------------------------------OSV-based quantities-------------------------------
+Begin OSV generation...
+qcp ti 1 6.164414002968976 0.056926655361185324
+qcp ti 2 6.164414002968976 0.07170071998829851
+    CPU time for T_ii        0.00 sec,  wall time    0.00 sec 
+    CPU time for SVD         0.00 sec,  wall time    0.00 sec 
+    CPU time for reading     0.00 sec,  wall time    0.00 sec 
+    CPU time for writing     0.00 sec,  wall time    0.00 sec 
+    CPU time for OSV generation     0.01 sec,  wall time    0.01 sec 
+    OSV generation, used memory: 616.34 MB
+    CPOSV threshold                 1.0E-10 
+    OSV threshold                   1.0E-04 
+    Average number of full OSVs          38 
+    Average number of OSVs               38 
+
+Begin computing S and F matrices...
+    CPU time for S/F generation     0.00 sec,  wall time    0.00 sec 
+    S/F generation, used memory: 616.54 MB
+
+Begin pair screening...
+    Pair screening threshold      1.0E-02 
+    Pair discarding threshold     1.0E-07 
+    Number of close pairs              10 
+    Number of remote pairs              0 
+    Number of discared pairs            0 
+
+Start the K matrix computations...
+    CPU time for reading            0.00 sec,  wall time    0.00 sec 
+    CPU time for transformation     0.00 sec,  wall time    0.00 sec 
+    CPU time for K generation     0.00 sec,  wall time    0.00 sec 
+    K generation, used memory: 616.54 MB
+
+Start the preconditioning...
+    CPU time for preconditioning     0.00 sec,  wall time    0.00 sec 
+    preconditioning, used memory: 617.44 MB
+
+-------------------------------OSV Many Body Expansion------------------------------
+MBE mode: standard OSV-MP2
+Begin cluster selection...
+    Number of 1-Body clusters     4 
+    ---------------------------------------------
+    2B selection threshold               1.0E-02 
+    Number of 2-Body clusters                  6 
+    Number of close 2-Body clusters            6 
+    Number of remote 2-Body clusters           0 
+    -----------------------------------------------
+    3B selection threshold               2.0E-01 
+    Number of 3-Body clusters                  4 
+    Number of remote 3-Body clusters           0 
+    -----------------------------------------------
+    CPU time for OSV cluster selection     0.00 sec,  wall time    0.00 sec 
+
+Begin residual iterations...
+    Begin MBE residual iterations...
+    1-Body time: read: 0.00, comp: 0.00, col: 0.00; ave 2 cycles
+    2-Body time: read: 0.00, comp: 0.01, col: 0.00; ave 6 cycles
+    CPU time for MBE residual     0.02 sec,  wall time    0.02 sec 
+
+    Begin global residual correction...
+    Residual iteration for close pairs
+    The average k loops: 4
+    Iter. 0: energy -0.2526344994, by energy increment 2.53E-01
+    Iter. 1: energy -0.2530472722, by energy increment 4.13E-04
+    Iter. 2: energy -0.2530524118, by energy increment 5.14E-06
+    Iter. 3: energy -0.2530525004, by energy increment 8.87E-08
+    Iter. 4: energy -0.2530525017, by energy increment 1.29E-09
+    OSV-MP2 energy converged!                            
+    Correlation energy of close pairs:     -0.2530525017 
+                                           ------------- 
+    MP2 correlation energy:                -0.2530525017 
+    CPU time for syn. and reading     0.02 sec,  wall time    0.02 sec 
+    CPU time for global correction     0.03 sec,  wall time    0.03 sec 
+    CPU time for energy computation      0.01 sec,  wall time    0.01 sec 
+    CPU time for data transmission       0.00 sec,  wall time    0.00 sec 
+    CPU time for residual iterations     0.05 sec,  wall time    0.05 sec 
+
+Begin OSV DM and dR with MBE...
+    1-Body time: read: 0.00, comp: 0.00, col: 0.00
+    2-Body time: read: 0.00, comp: 0.00, col: 0.00
+    3-Body time: read: 0.00, comp: 0.00, col: 0.00
+    CPU time for DM and dR computation     0.00 sec,  wall time    0.00 sec 
+    CPU time for data transmission         0.00 sec,  wall time    0.00 sec 
+    CPU time for OSV DM and dR             0.01 sec,  wall time    0.01 sec 
+
+Start computing dK and Yi...
+    CPU time for collecting PQ     0.00 sec,  wall time    0.00 sec 
+    CPU time for Yi and dK     0.01 sec,  wall time    0.01 sec 
+    CPU time for response of PQ     0.00 sec,  wall time    0.00 sec 
+    CPU time for collection of Yi(P)     0.00 sec,  wall time    0.00 sec 
+    CPU time for j loop      0.00 sec,  wall time    0.00 sec 
+    CPU time for i loop      0.00 sec,  wall time    0.00 sec 
+    CPU time for dK          0.00 sec,  wall time    0.00 sec 
+    CPU time for Yi          0.00 sec,  wall time    0.00 sec 
+    CPU time for reading     0.00 sec,  wall time    0.00 sec 
+    CPU time for writing     0.00 sec,  wall time    0.00 sec 
+    CPU time for Yi and dK     0.01 sec,  wall time    0.01 sec 
+    Yi and dK, used memory: 621.06 MB
+
+Begin MP2 derivative feri gradient...
+    CPU time for yli            0.00 sec,  wall time    0.00 sec 
+    CPU time for feri           0.03 sec,  wall time    0.03 sec 
+    CPU time for back trans     0.00 sec,  wall time    0.00 sec 
+    CPU time for grad           0.00 sec,  wall time    0.00 sec 
+    CPU time for MP2 derivarive feri     0.05 sec,  wall time    0.05 sec 
+    MP2 derivarive feri, used memory: 627.80 MB
+
+RHF ialp calculation starts...
+    CPU time for computing ialp     0.00 sec,  wall time    0.00 sec 
+    CPU time for collecting ialp     0.00 sec,  wall time    0.00 sec 
+    RHF ialp, used memory: 627.80 MB
+    CPU time for ialp generation     0.01 sec,  wall time    0.01 sec 
+
+Begin solving Z vector equation...
+    krylov cycle 0  r = 0.0131746
+    krylov cycle 1  r = 0.00702729
+    krylov cycle 2  r = 0.000751794
+    krylov cycle 3  r = 9.6106e-05
+    krylov cycle 4  r = 1.11414e-05
+    krylov cycle 5  r = 1.26145e-06
+    CPU time for feri         0.00 sec,  wall time    0.00 sec 
+    CPU time for J matrix     0.00 sec,  wall time    0.00 sec 
+    CPU time for K matrix     0.01 sec,  wall time    0.01 sec 
+    CPU time for CPHF solution     0.03 sec,  wall time    0.03 sec 
+    CPU time for term Pi and W     0.00 sec,  wall time    0.00 sec 
+    CPU time for Z vector          0.03 sec,  wall time    0.03 sec 
+    Z vector, used memory: 627.96 MB
+
+Properties of relaxed MP2
+    ------------------------------
+    Meta-Lowdin (ano) atomic charges:
+      0   O   -0.68507 
+      1   H    0.34253 
+      2   H    0.34253 
+    -------------------------------------------------
+    Dipole moment: 
+                        X          Y          Z      
+    Electronic         0.00000   -0.13330    0.00000 
+    Nuclear            0.00000   -0.95456    0.00000 
+    Total (a.u.)      -0.00000   -0.82126   -0.00000 
+    Total (Debye)     -0.00000   -2.08744   -0.00000 
+    -------------------------------------------------
+    CPU time for pop analysis     0.39 sec,  wall time    0.39 sec 
+
+Begin the computation of RHF gradient...
+    CPU time for fitting term A and B     0.00 sec,  wall time    0.00 sec 
+    CPU time for Yi     0.00 sec,  wall time    0.00 sec 
+    CPU time for gradient of (P|Q)     0.00 sec,  wall time    0.00 sec 
+    CPU time for feri           0.03 sec,  wall time    0.03 sec 
+    CPU time for back trans     0.00 sec,  wall time    0.00 sec 
+    CPU time for grad           0.00 sec,  wall time    0.00 sec 
+    CPU time for core hamiltonian grad     0.28 sec,  wall time    0.28 sec 
+
+-------------------------------------------
+Electronic energy (Eh):
+RHF energy :                -76.0594970864 
+MP2 correlation energy:      -0.2530525017 
+                            -------------- 
+Total energy:               -76.3125495881 
+--------------------------------------------------
+Energy gradient (Eh/Bohr):
+ Atom        X             Y             Z       
+  O      -0.00000000   -0.01919839    0.00000000 
+  H      -0.01200946    0.00959920    0.00000000 
+  H       0.01200946    0.00959920   -0.00000000 
+----------------------------------------------------------------------------
+Summary of timings:
+CPU time for RHF energy                  0.24 sec,  wall time    0.24 sec 
+CPU time for localization                0.16 sec,  wall time    0.16 sec 
+CPU time for MP2 feri                    0.03 sec,  wall time    0.03 sec 
+CPU time for OSV-based matrices          0.06 sec,  wall time    0.06 sec 
+CPU time for Residual iterations         0.05 sec,  wall time    0.05 sec 
+CPU time for OSV DM and dR               0.01 sec,  wall time    0.01 sec 
+CPU time for dK and Yi                   0.02 sec,  wall time    0.02 sec 
+CPU time for derivative feri             0.06 sec,  wall time    0.06 sec 
+CPU time for Z vector                    0.03 sec,  wall time    0.03 sec 
+CPU time for MP2 energy and gradient     0.41 sec,  wall time    0.41 sec 
+CPU time for RHF energy and gradient     0.98 sec,  wall time    0.99 sec 
+CPU time for RHF + MP2                   1.73 sec,  wall time    1.74 sec 
+----------------------------------------------------------------------------
+qcp ti 3 6.164414002968976 0.06672485526879356
+qcp ti 4 6.164414002968978 0.07170071998788366
