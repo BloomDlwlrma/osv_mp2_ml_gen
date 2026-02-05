@@ -2,7 +2,12 @@ import numpy as np
 from pyscf import gto, scf, df, lib
 from pyscf.dft import gen_grid, numint, radi
 from pyscf.dft.gen_grid import make_mask, BLKSIZE
-from pyscf.solvent import ddcosmo, ddpcm, ddcosmo_grad
+#from pyscf.solvent import ddcosmo, ddpcm, ddcosmo_grad
+'''
+swzhang modified, 2026-02-05
+'''
+from pyscf.solvent import ddcosmo, ddpcm
+import pyscf.solvent.grad as ddcosmo_grad
 from pyscf.symm import sph
 from pyscf.grad import rks as rks_grad
 import ctypes
