@@ -82,5 +82,7 @@ export chkfile_hf="/home/ubuntu/Shiwei/gen_feature/OSVMP2_ml_gen/work/mywater/hf
 export chkfile_loc="/home/ubuntu/Shiwei/gen_feature/OSVMP2_ml_gen/work/mywater/loc_var.chk"
 export molecule=mywater
 export moles=$OSVMP2PATH/coords/$molecule.xyz
-export ncore=2;export OMP_NUM_THREADS=1;export use_mbe=1;export use_ga=1
-mkdir -p test/$molecule;cd test/$molecule;rm -rf *;mpirun -n $ncore python $OSVMP2PATH/osvmp2/opt_df.py $moles
+export ncore=1;export OMP_NUM_THREADS=1;export use_mbe=1;export use_ga=1
+#export ncore=2;export OMP_NUM_THREADS=1;export use_mbe=1;export use_ga=1
+#mkdir -p test/$molecule;cd test/$molecule;rm -rf *;mpirun -n $ncore python $OSVMP2PATH/osvmp2/opt_df.py $moles
+mkdir -p test/$molecule;cd test/$molecule;rm -rf *; python $OSVMP2PATH/osvmp2/opt_df.py $moles
