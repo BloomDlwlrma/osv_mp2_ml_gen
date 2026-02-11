@@ -1,0 +1,7 @@
+Subject: ORCA Job DONE
+
+Job state    : DONE
+Job host     : nitrogen02
+Job location : /home/swnie/test/orca/orca_2_pyscf
+Job times    : 0 hours 0 minutes 2 seconds
+Job submiited on 00:44:51 23/01/26
