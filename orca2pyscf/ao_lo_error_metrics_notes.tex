@@ -1,0 +1,146 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\title{AO/LO Error Metrics Notes}
+\author{OSV-MP2 Validation}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Notation}
+Let:
+\begin{itemize}
+  \item $S \in \mathbb{R}^{n_{ao}\times n_{ao}}$: AO overlap matrix
+  \item $C_{occ} \in \mathbb{R}^{n_{ao}\times n_o}$: occupied canonical MO coefficients
+  \item $U \in \mathbb{R}^{n_o\times n_o}$: localized-orbital rotation matrix in occupied space
+  \item $O \in \mathbb{R}^{n_{ao}\times n_o}$: localized orbitals in AO basis
+  \item $F_{loc} \in \mathbb{R}^{n_o\times n_o}$: localized Fock matrix
+  \item $e_o \in \mathbb{R}^{n_o}$: localized orbital energies (target should match $\mathrm{diag}(F_{loc})$)
+\end{itemize}
+
+Throughout, $\|\cdot\|_\infty$ denotes max-absolute entry norm and $\|\cdot\|_F$ denotes Frobenius norm.
+
+\section{Metrics already in the original script}
+\subsection*{1) \texttt{ao\_orth\_err}}
+\[
+\texttt{ao\_orth\_err}=\left\|C_{occ}^T S C_{occ}-I\right\|_\infty
+\]
+Meaning: occupied canonical orbitals are orthonormal under AO metric.
+Use: AO-side sanity check for the imported HF checkpoint.
+
+\subsection*{2) \texttt{recon\_err}}
+\[
+\texttt{recon\_err}=\left\|C_{occ}U-O\right\|_\infty
+\]
+Meaning: reconstruction consistency of localized orbitals from canonical occupied space.
+Use: the most direct AO/LO consistency check.
+
+\subsection*{3) \texttt{uo\_orth\_err}}
+\[
+\texttt{uo\_orth\_err}=\left\|U^TU-I\right\|_\infty
+\]
+Meaning: orthogonality of localization rotation.
+Use: numerical conditioning/consistency of LO transform.
+
+\subsection*{4) \texttt{loc\_diag\_err}}
+\[
+\texttt{loc\_diag\_err}=\left\|\mathrm{diag}(F_{loc})-e_o\right\|_\infty
+\]
+Meaning: consistency between localized Fock diagonal and stored orbital energies.
+Use: checks checkpoint internal coherence.
+
+\subsection*{5) \texttt{loc\_sym\_err}}
+\[
+\texttt{loc\_sym\_err}=\left\|F_{loc}-F_{loc}^T\right\|_\infty
+\]
+Meaning: symmetry of localized Fock matrix.
+Use: physical/numerical sanity; typically near machine precision.
+
+\section{Additional AO/LO metrics (added for full comparison)}
+\subsection*{6) \texttt{ao\_orth\_rms\_err}}
+\[
+\texttt{ao\_orth\_rms\_err}=\sqrt{\mathrm{mean}\left((C_{occ}^TSC_{occ}-I)^2\right)}
+\]
+Use: robust global orthogonality quality, less sensitive to one outlier entry.
+
+\subsection*{7) \texttt{recon\_rms\_err}}
+\[
+\texttt{recon\_rms\_err}=\sqrt{\mathrm{mean}\left((C_{occ}U-O)^2\right)}
+\]
+Use: average reconstruction quality over all AO/LO entries.
+
+\subsection*{8) \texttt{recon\_rel\_fro\_err}}
+\[
+\texttt{recon\_rel\_fro\_err}=\frac{\|C_{occ}U-O\|_F}{\max(\|O\|_F,\epsilon)}
+\]
+Use: scale-invariant reconstruction error for cross-molecule comparison.
+
+\subsection*{9) \texttt{uo\_orth\_rms\_err}}
+\[
+\texttt{uo\_orth\_rms\_err}=\sqrt{\mathrm{mean}\left((U^TU-I)^2\right)}
+\]
+Use: global orthogonality quality of $U$.
+
+\subsection*{10) \texttt{uo\_cond}}
+\[
+\texttt{uo\_cond}=\kappa(U)
+\]
+Use: conditioning of LO transform; large values indicate numerical instability risk.
+
+\subsection*{11) \texttt{lo\_orth\_err}}
+\[
+\texttt{lo\_orth\_err}=\left\|O^TSO-I\right\|_\infty
+\]
+Use: direct orthogonality check on localized orbitals under AO metric.
+
+\subsection*{12) \texttt{lo\_orth\_rms\_err}}
+\[
+\texttt{lo\_orth\_rms\_err}=\sqrt{\mathrm{mean}\left((O^TSO-I)^2\right)}
+\]
+Use: robust global LO orthogonality comparison.
+
+\subsection*{13) \texttt{loc\_diag\_rms\_err}}
+\[
+\texttt{loc\_diag\_rms\_err}=\sqrt{\mathrm{mean}\left((\mathrm{diag}(F_{loc})-e_o)^2\right)}
+\]
+Use: average diagonal consistency of localized Fock.
+
+\subsection*{14) \texttt{loc\_sym\_rms\_err}}
+\[
+\texttt{loc\_sym\_rms\_err}=\sqrt{\mathrm{mean}\left((F_{loc}-F_{loc}^T)^2\right)}
+\]
+Use: average symmetry defect of localized Fock.
+
+\subsection*{15) \texttt{loc\_offdiag\_fro}}
+\[
+\texttt{loc\_offdiag\_fro}=\left\|F_{loc}-\mathrm{diag}(\mathrm{diag}(F_{loc}))\right\|_F
+\]
+Use: strength of off-diagonal couplings in localized representation (comparative descriptor, not a hard failure criterion by itself).
+
+\subsection*{16) \texttt{subspace\_proj\_err}}
+\[
+P_{occ}=C_{occ}C_{occ}^TS,\quad P_{loc}=OO^TS,
+\]
+\[
+\texttt{subspace\_proj\_err}=\|P_{occ}-P_{loc}\|_F
+\]
+Use: compares whether canonical occupied and localized orbitals span the same AO subspace.
+
+\subsection*{17) \texttt{max\_err}}
+\[
+\texttt{max\_err}=\max\{\texttt{ao\_orth\_err},\texttt{recon\_err},\texttt{uo\_orth\_err},\texttt{lo\_orth\_err},\texttt{loc\_diag\_err},\texttt{loc\_sym\_err}\}
+\]
+Use: scalar gate criterion used against tolerance $\texttt{tol}$.
+
+\section{How to interpret in practice}
+\begin{itemize}
+  \item Gate failure criterion: \texttt{max\_err > tol}.
+  \item Typical healthy scale at this workflow level: around $10^{-7}$ for orthogonality/reconstruction max errors and $10^{-15}$ for symmetry.
+  \item For robust ranking, compare both max and RMS metrics.
+  \item For cross-molecule comparisons with different sizes/scales, use relative metric \texttt{recon\_rel\_fro\_err}.
+\end{itemize}
+
+\end{document}

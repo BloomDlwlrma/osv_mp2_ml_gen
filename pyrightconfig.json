@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/pyright/main/packages/vscode-pyright/schemas/pyrightconfig.schema.json",
+  "venvPath": "/scr/u/u3651388/conda/envs",
+  "venv": "tdnn",
+  "pythonVersion": "3.9",
+  "extraPaths": [
+    "/home/u3651388/softwares/mokit"
+  ],
+  "reportMissingImports": "warning"
+}

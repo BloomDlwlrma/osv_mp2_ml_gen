@@ -1,0 +1,344 @@
+Basic settings:
+Integral generation: Incore
+Local density fitting: OFF
+Shared disk: OFF
+The molecue to be computed: water5
+The number of nodes: 1, cores: 4, threads/core: 1
+Maximum memory per node: 20000.00 MB (4896.19 MB used)
+Basis set: ccpvdz
+Auxilary basis for HF: {'O': 'cc-pvdz-jkfit', 'H': 'cc-pvdz-jkfit'}
+Auxilary basis for MP2: {'O': 'cc-pvdz-ri', 'H': 'cc-pvdz-ri'}
+The number of AOs: 120
+The number of occupied MOs: 25
+The number of auxilary basis for RHF: 580
+The number of auxilary basis for MP2: 420
+
+
+--------------------------------RHF energy---------------------------------
+Begin hf 3c2e AO integrals computation...
+AO int comp: t_cpu: 0.12, t_wall: 0.12, mem: 1122.86 MB
+AO int col: t_cpu: 0.01, t_wall: 0.01, mem: 1134.23 MB
+Set gradient conv threshold to 0.0001
+    CPU time for core Hamiltonian     0.01 sec,  wall time    0.01 sec 
+    CPU time for Initial guess of RHF DM     0.02 sec,  wall time    0.02 sec 
+init E= -379.032920778585
+    CPU time for initialize scf     0.08 sec,  wall time    0.08 sec 
+cycle= 1 E= -379.975175414999, delta_E= -9.42E-01, |g|=7.26E-14, |ddm|=2.83E+00
+cycle= 2 E= -380.104679593279, delta_E= -1.30E-01, |g|=6.21E-14, |ddm|=7.85E-01
+cycle= 3 E= -380.144325506352, delta_E= -3.96E-02, |g|=7.69E-14, |ddm|=2.91E-01
+cycle= 4 E= -380.145363992001, delta_E= -1.04E-03, |g|=4.79E-14, |ddm|=4.77E-02
+cycle= 5 E= -380.145453375745, delta_E= -8.94E-05, |g|=9.49E-14, |ddm|=1.91E-02
+cycle= 6 E= -380.145457433453, delta_E= -4.06E-06, |g|=5.50E-14, |ddm|=4.11E-03
+cycle= 7 E= -380.145458026957, delta_E= -5.94E-07, |g|=7.77E-14, |ddm|=1.46E-03
+cycle= 8 E= -380.145458062027, delta_E= -3.51E-08, |g|=7.13E-14, |ddm|=4.55E-04
+cycle= 9 E= -380.145458063519, delta_E= -1.49E-09, |g|=6.60E-14, |ddm|=9.06E-05
+converged SCF energy = -380.145458063519
+    CPU time for J matrix       0.00 sec,  wall time    0.00 sec 
+    CPU time for K matrix       0.00 sec,  wall time    0.00 sec 
+    CPU time for RHF energy     0.67 sec,  wall time    0.67 sec 
+    RHF energy, used memory: 1168.66 MB
+
+--------------------------------Localization---------------------------------
+Split localization: ON (5 core orbitals)
+Localization method: Pipek-Mezey with Lowdin-Meta_Lowdin
+Set conv_tol_grad to 0.000316228
+    CPU time for initializing CIAH     0.02 sec,  wall time    0.02 sec 
+macro= 1  f(x)= 12.658576052581  delta_f= 12.6586  |g|= 0.634299  3 KF 20 Hx
+macro= 2  f(x)= 13.627989291255  delta_f= 0.969413  |g|= 0.362698  4 KF 22 Hx
+macro= 3  f(x)= 13.788209720309  delta_f= 0.16022  |g|= 0.128504  4 KF 24 Hx
+macro= 4  f(x)= 13.859184964354  delta_f= 0.0709752  |g|= 0.0193731  4 KF 27 Hx
+macro= 5  f(x)= 13.86075977279  delta_f= 0.00157481  |g|= 0.0162447  3 KF 20 Hx
+macro= 6  f(x)= 13.861282470467  delta_f= 0.000522698  |g|= 0.00538578  2 KF 13 Hx
+macro= 7  f(x)= 13.861323973781  delta_f= 4.15033e-05  |g|= 0.00464972  1 KF 5 Hx
+macro= 8  f(x)= 13.86132434828  delta_f= 3.74499e-07  |g|= 1.82761e-05  1 KF 2 Hx
+macro= 9  f(x)= 15.368400148195  delta_f= 1.50708  |g|= 0.00849298  3 KF 13 Hx
+macro= 10  f(x)= 15.368403760653  delta_f= 3.61246e-06  |g|= 0.000271875  2 KF 8 Hx
+macro= 11  f(x)= 15.368403760712  delta_f= 5.90088e-11  |g|= 1.87829e-05  1 KF 1 Hx
+macro X = 11  f(x)= 15.368403760712  |g|= 1.87829e-05  22 intor 28 KF 155 Hx
+
+--------------------------------Localized MO integrals---------------------------------
+Begin hf 3c2e AO integrals computation...
+AO int comp: t_cpu: 0.09, t_wall: 0.09, mem: 1195.14 MB
+AO int col: t_cpu: 0.01, t_wall: 0.01, mem: 1200.58 MB
+
+Begin Cauchy-Schwartz prescreening for RHF...
+    CPU time for Schwartz integral     0.01 sec,  wall time    0.01 sec 
+    CPU time for shell pairs selecting     0.01 sec,  wall time    0.01 sec 
+    The threshold for AO pair screening: 1.00E-10
+    0 out of 14400 AO pairs are screened, sparsity: 0.00 percent
+norm of self.o 4.030451790308046
+    CPU time for computing ialp     0.01 sec,  wall time    0.01 sec 
+norm of ialp_aux 0 6.324396929503255
+norm of ialp_mo 0 4.061933481600172
+    CPU time for collecting ialp     0.00 sec,  wall time    0.00 sec 
+
+------------------------------OSV-based quantities-------------------------------
+Begin OSV generation...
+ialp_mo 5 1.8104234895049158
+ialp_mo 6 1.804241676215233
+ialp_mo 7 1.8209437184989357
+ialp_mo 8 1.8271658729537616
+ialp_mo 9 1.8198931886717495
+    Threshold of id-SVD: 1.00E-04
+    CPU time for T_ii        0.00 sec,  wall time    0.00 sec 
+    CPU time for SVD         0.01 sec,  wall time    0.01 sec 
+    CPU time for reading     0.00 sec,  wall time    0.00 sec 
+    CPU time for writing     0.01 sec,  wall time    0.01 sec 
+    CPU time for OSV generation     0.02 sec,  wall time    0.02 sec 
+    OSV generation, used memory: 1206.06 MB
+    CPOSV threshold                 1.0E-10 
+    OSV threshold                   1.0E-04 
+    Average number of full OSVs          32 
+    Average number of OSVs               21 
+
+Begin computing S and F matrices...
+S norm 5 5 4.4721359549995805
+S norm 5 6 1.0436528564773289
+S norm 5 7 0.09652721524666938
+S norm 5 8 0.3986425889885631
+S norm 5 9 0.2574856018355425
+S norm 5 10 4.448695550370889
+S norm 5 11 1.4413899572225426
+S norm 5 12 0.16282277449467022
+S norm 5 13 0.11545234707678549
+S norm 5 14 0.9997770314802134
+S norm 5 15 4.466502759843818
+S norm 5 16 4.462976961036991
+S norm 5 17 0.16699699467360699
+S norm 5 18 0.14668117163301997
+S norm 5 19 0.970363358060939
+S norm 5 20 1.1875323367412796
+S norm 5 21 1.0464350767046573
+S norm 5 22 0.29236926215608344
+S norm 5 23 0.18074390301867319
+S norm 5 24 0.99994520507618
+S norm 6 6 4.472135954999581
+S norm 6 7 0.24045461207757593
+S norm 6 8 1.752756116489657
+S norm 6 9 0.03664510364210765
+S norm 6 10 1.0326867150917591
+S norm 6 11 4.437925988056916
+S norm 6 12 1.0749291562633954
+S norm 6 13 0.15317961815401743
+S norm 6 14 0.12213939295247098
+S norm 6 15 2.425799031005772
+S norm 6 16 1.2362533121332817
+S norm 6 17 0.14706612938492594
+S norm 6 18 1.2540036147116622
+S norm 6 19 0.13019213023772885
+S norm 6 20 4.464753995951775
+S norm 6 21 4.466899433855872
+S norm 6 22 0.6851692565343971
+S norm 6 23 1.078469384499516
+S norm 6 24 0.1304598054640166
+S norm 7 7 4.582575694955838
+S norm 7 8 1.4493786092455014
+S norm 7 9 1.4538155011510547
+S norm 7 10 0.15666871455446768
+S norm 7 11 0.2688891598463628
+S norm 7 12 1.4372140058900176
+S norm 7 13 4.446783789436073
+S norm 7 14 1.047645916314312
+S norm 7 15 0.1401633795170853
+S norm 7 16 0.5502254782620094
+S norm 7 17 4.466975099809124
+S norm 7 18 1.6051877549780489
+S norm 7 19 1.0858239513403818
+S norm 7 20 0.5829875637676545
+    CPU time for S/F generation     0.00 sec,  wall time    0.00 sec 
+    S/F generation, used memory: 1206.67 MB
+
+Begin pair screening...
+    Pair screening threshold      1.0E-02 
+    Pair discarding threshold     1.0E-07 
+    Number of close pairs             145 
+    Number of remote pairs             65 
+    Number of discared pairs            0 
+
+Start the K matrix computations...
+    CPU time for reading            0.02 sec,  wall time    0.02 sec 
+    CPU time for transformation     0.01 sec,  wall time    0.01 sec 
+    CPU time for K generation     0.04 sec,  wall time    0.04 sec 
+    K generation, used memory: 1209.04 MB
+norm of self.o 4.030451790308046
+norm of ialp_aux 1 4.1717122996452325
+norm of ialp_mo 1 4.040956238685536
+ialp_mo 10 1.807053750966265
+ialp_mo 11 1.8235869208254332
+ialp_mo 12 1.8014835678785701
+ialp_mo 13 1.8026784461576886
+ialp_mo 14 1.800950354870111
+S norm 7 21 0.6364253457590208
+S norm 7 22 4.490840379067075
+S norm 7 23 2.6479068833106503
+S norm 7 24 1.0619943746857359
+S norm 8 8 4.690415759823431
+S norm 8 9 0.21689787354504428
+S norm 8 10 0.3576536322819661
+S norm 8 11 1.7713749331226338
+S norm 8 12 4.457288575706727
+S norm 8 13 1.0463137239820088
+S norm 8 14 0.1466680316691112
+S norm 8 15 0.6159132085870297
+S norm 8 16 0.6156766798012449
+S norm 8 17 1.0804149396008222
+S norm 8 18 4.498653724524469
+S norm 8 19 0.1713749328521409
+S norm 8 20 2.1487323258213964
+S norm 8 21 3.163552421277906
+S norm 8 22 1.3605918966592205
+S norm 8 23 4.4717590115844645
+S norm 8 24 0.17965171455901205
+S norm 9 9 4.472135954999578
+S norm 9 10 0.2930769099972863
+S norm 9 11 0.053995938456306944
+S norm 9 12 0.2155467885017207
+S norm 9 13 1.4596175102820184
+S norm 9 14 4.350434383372375
+S norm 9 15 0.2360969381373808
+S norm 9 16 0.623315295343624
+S norm 9 17 2.456000542170718
+S norm 9 18 0.24989565677225967
+S norm 9 19 4.360946540825542
+S norm 9 20 0.16138518008988412
+S norm 9 21 0.08094161726747727
+S norm 9 22 1.5025808888435956
+S norm 9 23 0.30200854209418104
+S norm 9 24 4.3511652205996425
+S norm 10 10 4.472135954999578
+S norm 10 11 1.4446796606896233
+S norm 10 12 0.1598845834689566
+S norm 10 13 0.18923653028540302
+S norm 10 14 0.9939419869959228
+S norm 10 15 4.46740204159812
+S norm 10 16 4.46142191617125
+S norm 10 17 0.23833518538168902
+S norm 10 18 0.1344215950170334
+S norm 10 19 0.9615834182610297
+S norm 10 20 1.191572497812737
+S norm 10 21 1.0376657251104975
+S norm 10 22 0.3571131120709772
+S norm 10 23 0.17329424281547803
+S norm 10 24 0.9881076379818451
+S norm 11 11 4.582575694955842
+norm of self.o 4.030451790308046
+norm of ialp_aux 2 3.9008355007630566
+norm of ialp_mo 2 3.5359556917866324
+ialp_mo 15 1.5780261789784764
+ialp_mo 16 1.5704835246753746
+ialp_mo 17 1.600985442106513
+ialp_mo 18 1.5726906268600525
+ialp_mo 19 1.5842623955045017
+S norm 11 12 1.1064038092312047
+S norm 11 13 0.18195803550422712
+S norm 11 14 0.2085990542108949
+S norm 11 15 2.65099263034852
+S norm 11 16 1.6121433166227546
+S norm 11 17 0.17531878623228436
+S norm 11 18 1.2879784422454295
+S norm 11 19 0.18250276390417508
+S norm 11 20 4.470370334581905
+S norm 11 21 4.4653618893919385
+S norm 11 22 0.6978847117134803
+S norm 11 23 1.111205691691438
+S norm 11 24 0.18846002939287146
+S norm 12 12 4.472135954999578
+S norm 12 13 1.0291134089749336
+S norm 12 14 0.13798000848457626
+S norm 12 15 0.28640807146021324
+S norm 12 16 0.4469578470728714
+S norm 12 17 1.0622906950919908
+S norm 12 18 4.463603504540171
+S norm 12 19 0.15491354706508567
+S norm 12 20 1.6187782592318327
+S norm 12 21 2.823275394289097
+S norm 12 22 1.3379053304591972
+S norm 12 23 4.466567779549851
+S norm 12 24 0.16782495473926418
+S norm 13 13 4.47213595499958
+S norm 13 14 1.0485514026896767
+S norm 13 15 0.13536402479163054
+S norm 13 16 0.5918894669836504
+S norm 13 17 4.46433513804731
+S norm 13 18 1.2488450048492519
+S norm 13 19 1.0905742064002841
+S norm 13 20 0.5238492581460296
+S norm 13 21 0.38503774847879063
+S norm 13 22 4.456658022019425
+S norm 13 23 2.4329837944916997
+S norm 13 24 1.0642394798264792
+S norm 14 14 4.472135954999581
+S norm 14 15 0.9945892997129175
+S norm 14 16 1.1400518699112518
+S norm 14 17 2.2336615064395065
+S norm 14 18 0.1691392864097835
+S norm 14 19 4.451122378683542
+S norm 14 20 0.5141726692032585
+S norm 14 21 0.1321134276005982
+S norm 14 22 1.1163509118903283
+S norm 14 23 0.19912079579919295
+S norm 14 24 4.466649665612821
+S norm 15 15 5.000000000000002
+S norm 15 16 4.522915796311705
+S norm 15 17 0.17547771640820947
+norm of self.o 4.030451790308046
+norm of ialp_aux 3 3.6520876679223937
+norm of ialp_mo 3 3.4893690301541547
+ialp_mo 20 1.572803048654835
+ialp_mo 21 1.5886409447298335
+ialp_mo 22 1.5426566787237552
+ialp_mo 23 1.5641714028864857
+ialp_mo 24 1.533553044876519
+S norm 15 18 0.3130387914842085
+S norm 15 19 0.9650595157945232
+S norm 15 20 2.5181537934780476
+S norm 15 21 2.4521144142607887
+S norm 15 22 0.40230094020101426
+S norm 15 23 0.2894128528774372
+S norm 15 24 0.9961884690156887
+S norm 16 16 4.58257569495584
+S norm 16 17 0.6845758413560735
+S norm 16 18 0.47031266954305245
+S norm 16 19 1.1119434579544654
+S norm 16 20 1.4156119809557086
+S norm 16 21 1.2794489584870645
+S norm 16 22 0.7126896293834039
+S norm 16 23 0.48700134613572343
+S norm 16 24 1.1351381234975235
+S norm 17 17 4.898979485566361
+S norm 17 18 1.2875656955990733
+S norm 17 19 2.2544406202471103
+S norm 17 20 0.5319185840596659
+S norm 17 21 0.441973828184923
+S norm 17 22 4.480476830711204
+S norm 17 23 2.456858861223088
+S norm 17 24 2.2333729450548803
+S norm 18 18 4.58257569495584
+S norm 18 19 0.20709817534784156
+S norm 18 20 1.761830308306703
+S norm 18 21 2.911751890149769
+S norm 18 22 1.5131104715320132
+S norm 18 23 4.516801133038302
+S norm 18 24 0.1944898194762813
+S norm 19 19 4.472135954999578
+S norm 19 20 0.4148275067133902
+S norm 19 21 0.1495666828870655
+S norm 19 22 1.157318703333871
+S norm 19 23 0.25074468142152556
+S norm 19 24 4.45508659595222
+S norm 20 20 4.690415759823429
+S norm 20 21 4.625580748608725
+S norm 20 22 0.9383893401592877
+S norm 20 23 1.6534486760730047
+S norm 20 24 0.46471596944412413
+S norm 21 21 5.196152422706632
+S norm 21 22 0.8974498021689614
+S norm 21 23 2.8367092263584275
+S norm 21 24 0.14435176134698496
+S norm 22 22 4.582575694955842
+S norm 22 23 2.5827955362142663
+S norm 22 24 1.1246358054062187
+S norm 23 23 5.000000000000001
+S norm 23 24 0.23308734620029614
+S norm 24 24 4.472135954999579
+Abs path of ML feature: /home/swnie/OSVMP2_ml_gen/work/test/water5/ml_features.hdf5
