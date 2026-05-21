@@ -13,7 +13,11 @@ orca2pyscf/xyz_files
 orca2pyscf/source_files
 orca2pyscf/logs
 orca2pyscf/*.cmd
+orca2pyscf/__pycache__
 work/osvccsd/__pycache__
 work/*.md
 work/*.cmd
+work/template_
+work/template
+
 
