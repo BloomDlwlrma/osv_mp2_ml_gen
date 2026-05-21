@@ -84,11 +84,6 @@ def worker(slot_id, task_queue, result_queue, base_env, allowed_ids=None):
 
 ---
 
-**References**
-
-- F. Neese, "The ORCA program system", WIREs Computational Molecular Science (2012).
-- Q. Sun et al., "PySCF: the Python-based simulations of chemistry framework", WIREs Comput Mol Sci (2018).
-
 ### 1.4 输出是什么
 
 `osvmp2` 路线最终会产出三类关键数据：
@@ -126,39 +121,10 @@ def worker(slot_id, task_queue, result_queue, base_env, allowed_ids=None):
 
 因此，`osvccsd` 可以理解为：**OSV-MP2 的高精度参考补充层**。它本身不是主线训练对象，但对于构建更可信的基准、分析 MP2 误差、以及扩展到更高精度目标很重要。
 
----
-
-## 3. 关键文件与职责
-
-- `batch_osvmp2_runner.py`：主批处理入口，负责并行运行、暂存、合并、记录能量。
-- `collect_hdf5.py`：通用 HDF5 合并器，支持 `OVERWRITE` 和 `APPEND_MISSING`。
-- `check_h5.py`：快速查看 HDF5 树结构与数据。
-- `osvmp2/`：OSV-MP2 方法实现主体。
-- `osvccsd/`：CCSD / CCSD(T) 的 pair energy 提取与汇总。
-- `template/`：运行环境模板与调度脚本模板。
-- `test/`：小规模样例数据与调试入口。
 
 ---
 
-## 4. 数据组织方式
-
-这套工作流的一个明显特征是文件组织非常结构化：
-
-- 输入侧依赖 ORCA 产生的轨道与分子信息。
-- 中间层通过 PySCF / MOKIT 恢复可计算对象。
-- 输出侧统一存成 HDF5，便于后续脚本直接读取。
-
-这意味着它既适合 HPC 批量处理，也适合后续接机器学习数据管线。
-
----
-
-## 5. 这套目录的核心一句话
-
-`osvmp2` 负责把 ORCA/PySCF 的分子电子结构结果转成**可分解、可压缩、可学习的 OSV 相关能数据**；`osvccsd` 则提供更高精度的 **CCSD / CCSD(T)** 参考 pair 能量，用来做基准、对照和误差分析。
-
----
-
-## 6. 快速理解流程
+## 5. 快速理解流程
 
 ```text
 ORCA 输出 / xyz
