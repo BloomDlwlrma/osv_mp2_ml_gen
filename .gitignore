@@ -16,7 +16,7 @@ orca2pyscf/*.cmd
 orca2pyscf/__pycache___
 work/osvccsd/__pycache__
 work/*.md
-work/*.cmd
+*.cmd
 work/template_
 work/template
 *.sh
