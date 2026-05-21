@@ -19,5 +19,5 @@ work/*.md
 work/*.cmd
 work/template_
 work/template
-
+*.sh
 
