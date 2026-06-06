@@ -334,3 +334,123 @@ These outputs are consumed by downstream descriptor alignment / training scripts
 - missing ORCA pairs are dropped, not padded
 
 This contract is what downstream merge/validation and training wrappers assume.
+
+---
+
+## 10. Downstream T-dNN Code Path and Handling
+
+This section maps OSVCCSD outputs to the downstream T-dNN code path used in the current pipeline.
+
+## 10.1 Entry points in REPT-dNN pipeline
+
+After OSVCCSD extraction, downstream processing is typically driven by these REPT-dNN scripts:
+
+- `split_pair_energ_ccsd.py`
+- `build_descriptors_ccsd_from_pairs.py`
+- `validate_descriptor_pair_contract.py`
+- `ml_osvccsd.py`
+- `ml_osvmp2.py`
+- `sanitize_pair_energy_hdf5.py`
+- `collect_h5.py`
+
+In stage-based orchestration (for example in smalltest style pipelines), the handoff is usually:
+
+1. OSVMP2 feature/pair generation
+2. OSVCCSD/OSVCCSD(T) pair generation
+3. Descriptor preparation and alignment
+4. Merge split outputs
+5. Train (`mp2`, `ccsd`, or `ccsdt` target)
+
+## 10.2 File-level handoff contract
+
+OSVCCSD side produces (canonical names):
+
+- `pair_energy_osvccsd.hdf5`
+- `pair_energy_osvccsdt.hdf5`
+
+Downstream T-dNN expects pair energy files to be converted/aligned into split training files with method tags, typically merged as:
+
+- `pene_split_mp2int_<SYSTEM>_osvccsd_<OSV_TOL>_<BASIS_TAG>_boys.hdf5`
+- `pene_split_mp2int_<SYSTEM>_osvccsdt_<OSV_TOL>_<BASIS_TAG>_boys.hdf5`
+
+Descriptor side is expected under:
+
+- `descriptors/<SYSTEM>/mp2int_boys_8_locj_lock_locf_fenemat_sym_<BASIS_TAG>/descriptors.hdf5`
+- `descriptors/<SYSTEM>/mp2int_boys_8_locj_lock_locf_fenemat_sym_<BASIS_TAG>/descriptors_ccsd.hdf5`
+- `descriptors/<SYSTEM>/mp2int_boys_8_locj_lock_locf_fenemat_sym_<BASIS_TAG>/descriptors_ccsdt.hdf5`
+
+The key operational rule is:
+
+- descriptor naming and pair naming must share the same `SYSTEM` and `BASIS_TAG` identity.
+
+## 10.3 Descriptor-pair alignment and validation in T-dNN
+
+Before training, downstream code performs structural contract checks.
+
+What is validated:
+
+- molecule key overlap
+- pairlist identity (not only shape)
+- availability of required pair types for selected training target
+
+The dedicated validator script is:
+
+- `validate_descriptor_pair_contract.py`
+
+This prevents silent training on misaligned descriptor/pair datasets.
+
+## 10.4 How `ml_osvccsd.py` and `ml_osvmp2.py` consume data
+
+`ml_osvccsd.py` acts as wrapper/launcher for CCSD and CCSD(T) target training setup. It prepares aligned pair files and passes runtime environment into `ml_osvmp2.py`.
+
+`ml_osvmp2.py` is the shared trainer backend that:
+
+- loads descriptor and pair datasets by pair type
+- performs split/scaler setup
+- trains per pair-type models
+
+For CCSD/CCSD(T) targets, method-specific descriptor file selection must be consistent:
+
+- `ccsd` -> `descriptors_ccsd.hdf5`
+- `ccsdt` -> `descriptors_ccsdt.hdf5`
+
+## 10.5 Remote pair handling and sanitization
+
+Downstream T-dNN includes hardening for problematic remote-pair slices.
+
+Key mechanism:
+
+- `sanitize_pair_energy_hdf5.py` removes unusable `offdiag_remote` and inconsistent `pairlist_offdiag_remote` payloads.
+
+This is important because scaler/training logic can fail when remote pair datasets are empty or mismatched.
+
+Recommended flow before model launch:
+
+1. Validate descriptor-pair contract
+2. Sanitize pair file when remote pairs are enabled
+3. Train via `ml_osvccsd.py`/`ml_osvmp2.py`
+
+## 10.6 Merge behavior before training
+
+When outputs are chunked, downstream uses `collect_h5.py` to produce canonical merged files.
+
+Typical merge targets include:
+
+- merged descriptors (`descriptors.hdf5`)
+- merged training descriptors (`descriptors_ccsd.hdf5`, `descriptors_ccsdt.hdf5`)
+- merged split pair-energy files (`pene_split_*.hdf5`)
+
+Training scripts should reference only merged canonical paths, not chunk files.
+
+## 10.7 Practical downstream checklist (OSVCCSD -> T-dNN)
+
+Use this checklist to avoid integration failures:
+
+1. Confirm OSVCCSD outputs exist and molecule keys are expected.
+2. Confirm descriptor tree uses `_sym_<BASIS_TAG>` naming.
+3. Confirm pair-energy merged filenames encode the same `SYSTEM` and `BASIS_TAG`.
+4. Run contract validator before training.
+5. Enable pair sanitization when remote pair channels are present.
+6. Ensure training target maps to correct descriptor training file (`ccsd` vs `ccsdt`).
+
+If all six checks pass, downstream T-dNN training should be reproducible and robust against the common dataset mismatch failures.
