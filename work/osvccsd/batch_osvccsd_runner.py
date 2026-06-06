@@ -12,8 +12,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from orca_out_parser import _expand_inputs, molname_from_path
-import h5py
-from typing import Set
+from ml_features_local import load_allowed_molecules
 
 
 def _load_pair_writer():
@@ -43,7 +42,7 @@ def _write_chunks(input_paths: list[Path], raw_fea: Path | None, qm_method: str,
     for idx in range(0, len(input_paths), chunk_size):
         chunk = input_paths[idx : idx + chunk_size]
         chunk_out = tmp_dir / f"chunk_{idx // chunk_size:05d}.h5"
-        pair_writer._write_hdf5(chunk_out, chunk, raw_fea, qm_method)
+        pair_writer._write_hdf5(chunk_out, chunk, raw_fea, qm_method, update_raw_features=False)
         chunk_files.append(chunk_out)
 
     return chunk_files
@@ -53,7 +52,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("inputs", nargs="+", help="ORCA .out files")
     parser.add_argument("--output", required=True, help="Final HDF5 output path")
-    parser.add_argument("--raw-fea", default=None, help="ml_features.hdf5 for pair ordering")
+    parser.add_argument("--raw-fea", required=True, help="ml_features.hdf5 for pair ordering")
     parser.add_argument("--qm-method", choices=["osvccsd", "osvccsdt"], default="osvccsdt")
     parser.add_argument("--chunk-size", type=int, default=128)
     parser.add_argument("--merge-mode", choices=["OVERWRITE", "APPEND_MISSING"], default="OVERWRITE")
@@ -66,37 +65,21 @@ def main() -> int:
 
     out_path = Path(args.output)
     out_dir = out_path.parent
-    raw_fea = Path(args.raw_fea) if args.raw_fea else None
+    raw_fea = Path(args.raw_fea)
+    if not raw_fea.exists():
+        raise FileNotFoundError(f"--raw-fea not found: {raw_fea}")
 
-    # Determine target molecules: if both pair_energy.hdf5 and ml_features.hdf5
-    # already exist in the output directory, use the groups from pair_energy.hdf5
-    # as the processing set. Otherwise process all input .out files.
-    pair_h5 = out_dir / "pair_energy.hdf5"
-    ml_h5 = out_dir / "ml_features.hdf5"
-    target_mols: Set[str] | None = None
-    if pair_h5.exists() and ml_h5.exists():
-        try:
-            with h5py.File(pair_h5, "r") as hfin:
-                target_mols = set(hfin.keys())
-        except Exception:
-            target_mols = None
+    target_mols = load_allowed_molecules(raw_fea)
 
-    # Map inputs by molname and filter if target_mols specified
-    has_missing = False
-    if target_mols is not None:
+    # Map inputs by molname and keep only molecules already present in ml_features.hdf5.
+    if target_mols:
         mol_map = {}
         for p in input_paths:
             mol_map.setdefault(molname_from_path(p), p)
-        missing = sorted([m for m in target_mols if m not in mol_map])
-        if missing:
-            has_missing = True
-            print(f"[batch_osvccsd_runner] Warning: {len(missing)} mols in '{pair_h5}' missing .out files: {missing[:5]}{('...' if len(missing)>5 else '')}")
-        filtered = [mol_map[m] for m in sorted(target_mols) if m in mol_map]
-        input_paths = filtered
-
-    if has_missing:
-        print("[batch_osvccsd_runner] Aborting: some molecules have missing .out files. Returning non-zero exit code.")
-        return 1
+        skipped = sorted([m for m in mol_map if m not in target_mols])
+        if skipped:
+            print(f"[batch_osvccsd_runner] Skipping {len(skipped)} molecules not present in ml_features.hdf5: {skipped[:5]}{('...' if len(skipped)>5 else '')}")
+        input_paths = [mol_map[m] for m in sorted(target_mols) if m in mol_map]
 
     if not input_paths:
         print("[batch_osvccsd_runner] No matched input .out files to process after filtering.")
@@ -112,7 +95,7 @@ def main() -> int:
     def _produce(output_path: Path, qm_method: str) -> None:
         if len(input_paths) <= args.chunk_size:
             pair_writer = _load_pair_writer()
-            pair_writer._write_hdf5(output_path, input_paths, raw_fea, qm_method)
+            pair_writer._write_hdf5(output_path, input_paths, raw_fea, qm_method, update_raw_features=False)
             return
 
         with tempfile.TemporaryDirectory(prefix=f"osvccsd_{qm_method}_") as tmp_root:

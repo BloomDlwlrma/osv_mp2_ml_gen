@@ -1,3 +1,7 @@
+'''
+解析器: 用正则匹配 ORCA 输出中的 pair correlation 和 triple 行，提供迭代器 iter_pair_corr() 与 iter_triples()，
+以及小数据类 PairCorrRecord / TripleRecord 和 molname_from_path()（提取分子 id）。该模块把文本解析成结构化记录，供上层写入 HDF5 使用。
+'''
 from __future__ import annotations
 
 import re

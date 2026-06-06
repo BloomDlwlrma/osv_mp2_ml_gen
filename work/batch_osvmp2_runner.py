@@ -65,6 +65,9 @@ except ImportError:
 
 # Size of chunk dirs like `1_16000`
 CHUNK_SIZE = 16000
+INPUT_LAYOUT = os.environ.get("INPUT_LAYOUT", "chunked").strip().lower()
+if INPUT_LAYOUT not in {"chunked", "flat"}:
+    raise ValueError(f"Unsupported INPUT_LAYOUT={INPUT_LAYOUT}; expected chunked or flat")
 ENV_DEFAULTS = {
     "local_type": "1",
     "verbose": "5",
@@ -83,8 +86,8 @@ ENV_DEFAULTS = {
     "spin": "0",
     "cposv_tol": "1e-10",
     "osv_tol": "1e-4",
-    "remo_tol": "1e-6",
-    "disc_tol": "1e-6",
+    "remo_tol": "1e-2",
+    "disc_tol": "1e-7",
     "threeb_tol": "0.2",
     "shell_tol": "1e-10",
     "fit_tol": "1e-6",
@@ -97,7 +100,6 @@ ENV_DEFAULTS = {
     "use_mbe": "1",
     "use_ga": "1",
 }
-
 
 def parse_energies_from_run_log(log_path):
     """
@@ -257,11 +259,18 @@ def worker(slot_id, task_queue, result_queue, base_env, allowed_ids=None):
             continue
             
         mol_name = f"dsgdb9nsd_{mol_id:06d}"
-        chunk_dir = get_chunk_dir(mol_id)
-        
+        if INPUT_LAYOUT == "flat":
+            chunk_dir = ""
+        else:
+            chunk_dir = get_chunk_dir(mol_id)
+
         xyz_file = os.path.join(XYZ_BASE, f"{mol_name}.xyz")
-        chk_hf = os.path.join(CHK_HF_BASE, chunk_dir, f"hf_mat_{mol_name}_{CHK_SUFFIX_HF}.chk")
-        chk_loc = os.path.join(CHK_LOC_BASE, chunk_dir, f"loc_var_{mol_name}_{CHK_SUFFIX_LOC}.chk")
+        if INPUT_LAYOUT == "flat":
+            chk_hf = os.path.join(CHK_HF_BASE, f"hf_mat_{mol_name}_{CHK_SUFFIX_HF}.chk")
+            chk_loc = os.path.join(CHK_LOC_BASE, f"loc_var_{mol_name}_{CHK_SUFFIX_LOC}.chk")
+        else:
+            chk_hf = os.path.join(CHK_HF_BASE, chunk_dir, f"hf_mat_{mol_name}_{CHK_SUFFIX_HF}.chk")
+            chk_loc = os.path.join(CHK_LOC_BASE, chunk_dir, f"loc_var_{mol_name}_{CHK_SUFFIX_LOC}.chk")
         
         # Check if source files exist
         if not os.path.exists(xyz_file) or not os.path.exists(chk_hf) or not os.path.exists(chk_loc):
@@ -528,7 +537,12 @@ def main():
     result_queue = manager.Queue()
     
     # 1. Fill Queue
-    for mol_id in range(args.start_id, args.end_id + 1):
+    if allowed_ids is not None:
+        task_ids = [mol_id for mol_id in sorted(allowed_ids) if args.start_id <= mol_id <= args.end_id]
+    else:
+        task_ids = list(range(args.start_id, args.end_id + 1))
+
+    for mol_id in task_ids:
         task_queue.put(mol_id)
         
     # Put Stop marker for each worker

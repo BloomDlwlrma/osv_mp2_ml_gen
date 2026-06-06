@@ -8,6 +8,7 @@ from pathlib import Path
 import h5py
 import numpy as np
 
+from ml_features_local import load_allowed_molecules, write_method_datasets
 from orca_out_parser import _expand_inputs, iter_pair_corr, iter_triples, molname_from_path
 
 
@@ -37,100 +38,122 @@ def _aggregate_triples(path: Path) -> dict[tuple[int, int], float]:
     return acc
 
 
-def _write_hdf5(output_path: Path, source_files: list[Path], raw_fea_path: Path | None, qm_method: str) -> None:
-    pair_map: dict[str, dict[tuple[int, int], float]] = defaultdict(dict)
-    triple_count_map: dict[str, int] = defaultdict(int)
-    ignored_pair_count: dict[str, int] = defaultdict(int)
-    for path in source_files:
-        molname = molname_from_path(path)
-        pair_order = None
-        nocc = None
-        allowed_pairs: set[int] | None = None
-        if raw_fea_path is not None:
-            loaded = _load_pair_metadata(raw_fea_path, molname)
-            if loaded is not None:
-                pair_order, nocc, allowed_pairs, screened_pairs = loaded
-        for record in iter_pair_corr(path):
-            if allowed_pairs is not None and nocc is not None:
-                # ml_features stores raw ORCA pairs (possibly i > j) as j_raw*nocc+i_raw
-                # But iter_pair_corr normalizes to i <= j, so encode as i_norm*nocc+j_norm
-                pair_id = record.i * nocc + record.j
-                if pair_id not in allowed_pairs:
-                    ignored_pair_count[molname] += 1
-                    continue
-            pair_map[molname][(record.i, record.j)] = record.ep_final
-        if qm_method == "osvccsdt":
-            triple_map = _aggregate_triples(path)
-            triple_count_map[molname] = len(triple_map)
-            for pair, et_ijk in triple_map.items():
-                if allowed_pairs is not None and nocc is not None:
-                    # pair is already normalized (i <= j) from iter_triples
-                    pair_id = pair[0] * nocc + pair[1]
-                    if pair_id not in allowed_pairs:
-                        continue
-                if pair in pair_map[molname]:
-                    pair_map[molname][pair] += et_ijk
-                else:
-                    print(f"  WARNING: triple pair {pair} has no corresponding pair_corr for {molname}")
-                    pair_map[molname][pair] = et_ijk
+def _pairid_to_pair(pair_id: int, nocc: int) -> tuple[int, int]:
+    return int(pair_id // nocc), int(pair_id % nocc)
 
+
+def _write_hdf5(
+    output_path: Path,
+    source_files: list[Path],
+    raw_fea_path: Path | None,
+    qm_method: str,
+    update_raw_features: bool = True,
+) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    allowed_mols = load_allowed_molecules(raw_fea_path) if raw_fea_path is not None else set()
+
     with h5py.File(output_path, "w") as hout:
         hout.attrs["source_method"] = qm_method
+        hout.attrs["pair_output_mode"] = "orca_kept_pairs_only"
         if raw_fea_path is not None:
             hout.attrs["raw_features_h5"] = str(raw_fea_path)
 
-        for molname, records in pair_map.items():
-            grp = hout.create_group(molname)
-            pair_order = None
-            nocc = None
-            screened_pairs: set[int] = set()
-            ignored_count = ignored_pair_count.get(molname, 0)
-            if raw_fea_path is not None:
-                loaded = _load_pair_metadata(raw_fea_path, molname)
-                if loaded is not None:
-                    pair_order, nocc, allowed_pairs, screened_pairs = loaded
-                    grp.attrs["n_screened_remote_pairs"] = len(screened_pairs)
-            if pair_order is not None and nocc is not None:
-                pair_ene = np.empty(len(pair_order), dtype=np.float64)
-                missing_pairs = []
-                for idx, pair_id in enumerate(pair_order):
-                    # pair_order contains pair IDs from ml_features (may be raw ORCA pairs: j_raw*nocc+i_raw)
-                    # iter_pair_corr returns normalized pairs (i <= j), so try both orderings
-                    i_norm = int(pair_id // nocc)
-                    j_norm = int(pair_id % nocc)
-                    value = records.get((i_norm, j_norm))
-                    if value is None:
-                        value = records.get((j_norm, i_norm))
-                    if value is None:
-                        missing_pairs.append((i_norm, j_norm))
-                        value = np.nan
-                    pair_ene[idx] = value
-                if missing_pairs or ignored_count:
-                    print(f"  INFO [{molname}]: ignored_orca_pairs={ignored_count}, missing_kept_pairs={len(missing_pairs)}")
-                    if missing_pairs:
-                        print(f"    first_missing_kept_pairs={missing_pairs[:5]}")
-            else:
-                pairs = sorted(records.items())
-                pair_ene = np.fromiter((value for _, value in pairs), dtype=np.float64, count=len(pairs))
-            grp.create_dataset("pair_ene", data=pair_ene)
-            if raw_fea_path is not None:
-                grp.attrs["n_ignored_orca_pairs"] = ignored_count
+        for path in source_files:
+            molname = molname_from_path(path)
+            if allowed_mols and molname not in allowed_mols:
+                print(f"[osvccsd] Skipping {molname}: not present in ml_features.hdf5")
+                continue
+
+            loaded = _load_pair_metadata(raw_fea_path, molname) if raw_fea_path is not None else None
+            pair_order: np.ndarray | None = None
+            nocc: int | None = None
+            screened_pairs: set[int] | None = None
+            if loaded is not None: 
+                pair_order, nocc, _, screened_pairs = loaded
+
+            pair_records: dict[tuple[int, int], float] = {}
+            for record in iter_pair_corr(path):
+                pair_records[(record.i, record.j)] = record.ep_final
+
+            triple_map: dict[tuple[int, int], float] = {}
             if qm_method == "osvccsdt":
-                grp.attrs["n_triple_pairs"] = triple_count_map.get(molname, 0)
+                triple_map = _aggregate_triples(path)
+
+            if pair_order is not None and nocc is not None:
+                kept_pair_ids: list[int] = []
+                kept_pair_ene: list[float] = []
+                skipped_pair_count = 0
+                for pair_id in pair_order:
+                    i_norm, j_norm = _pairid_to_pair(int(pair_id), nocc)
+                    value = pair_records.get((i_norm, j_norm))
+                    if value is None:
+                        value = pair_records.get((j_norm, i_norm))
+                    if value is None:
+                        skipped_pair_count += 1
+                        continue
+                    if qm_method == "osvccsdt":
+                        triple_value = triple_map.get((i_norm, j_norm))
+                        if triple_value is None:
+                            triple_value = triple_map.get((j_norm, i_norm), 0.0)
+                        value += triple_value
+                    kept_pair_ids.append(int(pair_id))
+                    kept_pair_ene.append(float(value))
+
+                pairlist_out = np.asarray(kept_pair_ids, dtype=np.int64)
+                pair_ene_out = np.asarray(kept_pair_ene, dtype=np.float64)
+                offdiag_out = np.asarray(
+                    [pid for pid in kept_pair_ids if _pairid_to_pair(pid, nocc)[0] != _pairid_to_pair(pid, nocc)[1]],
+                    dtype=np.int64,
+                )
+                suffix_payload = {
+                    "pairlist": pairlist_out,
+                    "pair_ene": pair_ene_out,
+                    "pairlist_offdiag": offdiag_out,
+                }
+            else:
+                raise RuntimeError(
+                    f"[{molname}] missing pair metadata from --raw-fea; "
+                    "pairlist-driven CCSD/CCSDT extraction requires 1D pairlist + nocc."
+                )
+
+            grp = hout.create_group(molname)
+            grp.create_dataset("pairlist", data=pairlist_out)
+            grp.create_dataset("pair_ene", data=pair_ene_out)
+            # embed occupancy and screening metadata when available so pair_energy files are self-contained
+            if nocc is not None:
+                # store nocc as a 1-element integer dataset (keeps compatibility with existing readers)
+                grp.create_dataset("nocc", data=np.asarray([int(nocc)], dtype=np.int32))
+            if screened_pairs:
+                # store screened pair indices as an integer array
+                grp.create_dataset("pairlist_screened", data=np.asarray(sorted(list(screened_pairs)), dtype=np.int64))
+            grp.attrs["n_kept_pairs"] = int(len(pair_ene_out))
+            grp.attrs["n_skipped_orca_pairs"] = int(skipped_pair_count)
+            grp.attrs["method"] = qm_method
+
+            if qm_method == "osvccsdt":
+                grp.attrs["n_triple_pairs"] = int(len(triple_map))
+
+            if raw_fea_path is not None and update_raw_features:
+                write_method_datasets(raw_fea_path, molname, qm_method, suffix_payload)
+
+            print(
+                f"  INFO [{molname}]: skipped_orca_pairs={skipped_pair_count}, "
+                f"kept_pairs={len(pair_ene_out)}, missing_kept_pairs=0"
+            )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("inputs", nargs="+", help="ORCA .out files")
     parser.add_argument("--output", required=True, help="Output HDF5 path")
-    parser.add_argument("--raw-fea", default=None, help="ml_features.hdf5 for pair ordering")
+    parser.add_argument("--raw-fea", required=True, help="ml_features.hdf5 for pair ordering and update target")
     parser.add_argument(
         "--qm-method",
         choices=["osvccsd", "osvccsdt"],
         default="osvccsd",
         help="`osvccsd` writes pair-only energies; `osvccsdt` adds triples corrections to pairs.",
     )
+    parser.add_argument("--no-update-raw-fea", action="store_true", help="Do not append method datasets back to ml_features.hdf5")
     args = parser.parse_args()
 
     input_paths = _expand_inputs(args.inputs)
@@ -140,8 +163,9 @@ def main() -> int:
     _write_hdf5(
         Path(args.output),
         input_paths,
-        Path(args.raw_fea) if args.raw_fea else None,
+        Path(args.raw_fea),
         args.qm_method,
+        update_raw_features=not args.no_update_raw_fea,
     )
     return 0
 
